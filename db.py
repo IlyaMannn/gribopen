@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS sale (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
     season_id INTEGER NOT NULL REFERENCES season(id),
-    buyer_id INTEGER NOT NULL REFERENCES buyer(id),
+    buyer_id INTEGER REFERENCES buyer(id),
     grade_id INTEGER NOT NULL REFERENCES grade(id),
     weight_kg REAL NOT NULL,
     price_per_kg REAL NOT NULL,

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Расходы — Учёт грибов{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-4">
+    <h1 class="text-xl font-semibold text-gray-900 px-1">Расходы</h1>
+
+    <p class="text-sm text-gray-600 px-1">Здесь — общие расходы (не на сушку). Расходы на сушку (свет, вода, дрова, зарплата сушильщикам) учитываются отдельно в <a href="{{ url_for('drying') }}" class="text-emerald-700 underline">Сушке</a>.</p>
+
+    <form method="post" class="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
+        <h2 class="font-medium text-gray-900">Новый расход</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Дата</label>
+                <input type="date" name="date" value="{{ selected_date }}" required
+                       class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Сумма, ₽</label>
+                <input type="number" step="0.01" min="0" inputmode="decimal" name="amount" required
+                       placeholder="0"
+                       class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Категория</label>
+            <input type="text" name="category" required maxlength="60"
+                   list="cat-list"
+                   placeholder="Например: аренда, транспорт, зарплата"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            <datalist id="cat-list">
+                <option value="Аренда">
+                <option value="Транспорт">
+                <option value="Зарплата">
+                <option value="Налоги">
+                <option value="Упаковка">
+                <option value="Прочее">
+            </datalist>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Заметка (необязательно)</label>
+            <input type="text" name="notes" maxlength="200"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        </div>
+
+        <button type="submit"
+                class="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition">
+            Записать расход
+        </button>
+    </form>
+
+    <div class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="font-medium text-gray-900">Расходы за {{ selected_date|dmy }}</h2>
+            <span class="text-sm text-gray-500">{{ rows|length }} шт.</span>
+        </div>
+
+        {% if rows %}
+            <ul class="divide-y divide-gray-100">
+                {% for r in rows %}
+                <li class="px-4 py-3 flex items-start justify-between gap-3">
+                    <div class="text-sm flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="font-medium text-gray-900">{{ r.category }}</span>
+                            <span class="text-gray-500">·</span>
+                            <span class="font-semibold text-red-600">{{ r.amount|money }}</span>
+                        </div>
+                        {% if r.notes %}
+                        <div class="text-xs text-gray-500 mt-0.5">{{ r.notes }}</div>
+                        {% endif %}
+                    </div>
+                    <form method="post" action="{{ url_for('expenses_delete', expense_id=r.id) }}"
+                          onsubmit="return confirm('Удалить расход «{{ r.category }} {{ r.amount|money }}»?')">
+                        <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
+                        </button>
+                    </form>
+                </li>
+                {% endfor %}
+            </ul>
+
+            {% set day_total = rows|sum(attribute='amount') %}
+            <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex justify-between text-sm">
+                <span class="text-gray-600">Итого за день:</span>
+                <span class="font-semibold text-red-600">{{ day_total|money }}</span>
+            </div>
+        {% else %}
+            <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет расходов за эту дату</p>
+        {% endif %}
+    </div>
+
+    {% if season_expenses.total > 0 %}
+    <div class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-2">Итог за сезон</h2>
+        <p class="text-2xl font-semibold text-red-600 text-center mb-3">{{ season_expenses.total|money }}</p>
+        {% if season_expenses.by_category %}
+        <div class="border-t border-gray-100 pt-3 space-y-1 text-sm">
+            {% for cat, amount in season_expenses.by_category.items() %}
+            <div class="flex justify-between">
+                <span class="text-gray-600">{{ cat }}</span>
+                <span class="text-gray-700">{{ amount|money }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

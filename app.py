@@ -158,6 +158,8 @@ def home():
     dry_stock = models.get_dry_stock(season_id)
     season_totals = models.get_raw_stock_total_season(season_id)
     season_yield = models.get_drying_yield_season(season_id)
+    season_sales = models.get_sales_total_season(season_id)
+    season_expenses = models.get_expenses_total_season(season_id)
 
     # Итоги за сегодня
     today = date.today().isoformat()
@@ -167,6 +169,8 @@ def home():
     today_drying = models.get_drying_kg_by_date(today, season_id)
     waste_today = models.get_waste_kg_by_date(today, season_id)
     waste_pct_today = (waste_today / accepted_today_kg * 100) if accepted_today_kg > 0 else 0.0
+    today_sales = models.get_sales_kg_by_date(today, season_id)
+    today_expenses = models.get_expenses_by_date(today, season_id)
 
     return render_template(
         "home.html",
@@ -175,11 +179,15 @@ def home():
         dry_stock=dry_stock,
         season_totals=season_totals,
         season_yield=season_yield,
+        season_sales=season_sales,
+        season_expenses=season_expenses,
         accepted_today_kg=accepted_today_kg,
         accepted_today_amount=accepted_today_amount,
         today_drying=today_drying,
         waste_today=waste_today,
         waste_pct_today=waste_pct_today,
+        today_sales=today_sales,
+        today_expenses=today_expenses,
         today=today,
     )
 
@@ -284,11 +292,13 @@ def directories():
     grades = models.list_grades()
     prices = models.list_purchase_prices()
     suppliers = models.list_suppliers()
+    buyers = models.list_buyers()
     return render_template(
         "directories.html",
         grades=grades,
         prices=prices,
         suppliers=suppliers,
+        buyers=buyers,
         today=date.today().isoformat(),
     )
 
@@ -356,6 +366,47 @@ def directories_delete_supplier(supplier_id):
     else:
         flash("Поставщик удалён", "ok")
     return redirect(url_for("directories") + "#suppliers")
+
+
+# --- Покупатели ----------------------------------------------------------------
+
+@app.route("/directories/buyers", methods=["POST"])
+@login_required
+def directories_add_buyer():
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not name:
+        flash("Имя покупателя обязательно", "err")
+        return redirect(url_for("directories") + "#buyers")
+    models.add_buyer(name, phone, notes)
+    flash(f"Покупатель «{name}» добавлен", "ok")
+    return redirect(url_for("directories") + "#buyers")
+
+
+@app.route("/directories/buyers/<int:buyer_id>/edit", methods=["POST"])
+@login_required
+def directories_edit_buyer(buyer_id):
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not name:
+        flash("Имя покупателя обязательно", "err")
+        return redirect(url_for("directories") + "#buyers")
+    models.update_buyer(buyer_id, name, phone, notes)
+    flash("Покупатель обновлён", "ok")
+    return redirect(url_for("directories") + "#buyers")
+
+
+@app.route("/directories/buyers/<int:buyer_id>/delete", methods=["POST"])
+@login_required
+def directories_delete_buyer(buyer_id):
+    affected = models.delete_buyer(buyer_id)
+    if affected:
+        flash(f"Покупатель удалён. У {affected} продаж покупатель снят.", "ok")
+    else:
+        flash("Покупатель удалён", "ok")
+    return redirect(url_for("directories") + "#buyers")
 
 
 # --- Сушка --------------------------------------------------------------------
@@ -498,28 +549,117 @@ def waste_delete(record_id):
     return redirect(request.referrer or url_for("waste"))
 
 
+# --- Продажи -------------------------------------------------------------------
+
+@app.route("/sales", methods=["GET", "POST"])
+@login_required
+def sales():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    grades = models.list_grades()
+    buyers = models.list_buyers()
+    today = date.today().isoformat()
+    dry_stock = models.get_dry_stock(season_id)
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or today
+        buyer_id_raw = request.form.get("buyer_id") or ""
+        buyer_id = int(buyer_id_raw) if buyer_id_raw.isdigit() else None
+        try:
+            grade_id = int(request.form.get("grade_id") or 0)
+        except ValueError:
+            grade_id = 0
+        w = _parse_kg(request.form.get("weight_kg"))
+        p = _parse_kg(request.form.get("price_per_kg"))
+
+        if grade_id <= 0 or w <= 0 or p < 0:
+            flash("Заполните сорт, вес и цену", "err")
+            return redirect(url_for("sales"))
+        if w > dry_stock.get(grade_id, 0) + 0.001:
+            gname = next((g["display_name"] for g in grades if g["id"] == grade_id), "?")
+            flash(f"Недостаточно сухого {gname}: остаток {dry_stock.get(grade_id, 0):.2f} кг, продаёте {w:.2f}", "err")
+            return redirect(url_for("sales"))
+
+        models.add_sale(form_date, season_id, buyer_id, grade_id, w, p)
+        flash(f"Продажа записана: {w:.2f} кг · {w*p:.2f} ₽", "ok")
+        return redirect(url_for("sales"))
+
+    # GET
+    selected_date = request.args.get("date") or today
+    rows = models.list_sales_for_date(selected_date, season_id)
+    season_sales = models.get_sales_total_season(season_id)
+    return render_template(
+        "sales.html",
+        grades=grades,
+        buyers=buyers,
+        today=today,
+        selected_date=selected_date,
+        dry_stock=dry_stock,
+        rows=rows,
+        season_sales=season_sales,
+    )
+
+
+@app.route("/sales/<int:sale_id>/delete", methods=["POST"])
+@login_required
+def sales_delete(sale_id):
+    models.delete_sale(sale_id)
+    flash("Продажа удалена", "ok")
+    return redirect(request.referrer or url_for("sales"))
+
+
+# --- Расходы (общие) -----------------------------------------------------------
+
+@app.route("/expenses", methods=["GET", "POST"])
+@login_required
+def expenses():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    today = date.today().isoformat()
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or today
+        category = (request.form.get("category") or "").strip()
+        amount = _parse_kg(request.form.get("amount"))
+        notes = request.form.get("notes") or ""
+        if not category or amount <= 0:
+            flash("Заполните категорию и сумму (> 0)", "err")
+            return redirect(url_for("expenses"))
+        models.add_expense(form_date, season_id, category, amount, notes)
+        flash(f"Расход записан: {category} · {amount:.2f} ₽", "ok")
+        return redirect(url_for("expenses"))
+
+    # GET
+    selected_date = request.args.get("date") or today
+    rows = models.list_expenses_for_date(selected_date, season_id)
+    season_expenses = models.get_expenses_total_season(season_id)
+    return render_template(
+        "expenses.html",
+        today=today,
+        selected_date=selected_date,
+        rows=rows,
+        season_expenses=season_expenses,
+    )
+
+
+@app.route("/expenses/<int:expense_id>/delete", methods=["POST"])
+@login_required
+def expenses_delete(expense_id):
+    models.delete_expense(expense_id)
+    flash("Расход удалён", "ok")
+    return redirect(request.referrer or url_for("expenses"))
+
+
 # --- Заглушки остальных разделов ----------------------------------------------
 
 PLACEHOLDERS = {
-    "sales": ("Продажа", 4),
-    "expenses": ("Расходы", 4),
     "seasons": ("Сезоны", 5),
     "reports": ("Отчёты", 6),
 }
-
-
-@app.route("/sales")
-@login_required
-def sales():
-    return render_template("placeholder.html", title=PLACEHOLDERS["sales"][0],
-                           stage=PLACEHOLDERS["sales"][1])
-
-
-@app.route("/expenses")
-@login_required
-def expenses():
-    return render_template("placeholder.html", title=PLACEHOLDERS["expenses"][0],
-                           stage=PLACEHOLDERS["expenses"][1])
 
 
 @app.route("/seasons")

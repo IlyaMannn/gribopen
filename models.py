@@ -225,7 +225,7 @@ def get_raw_stock(season_id: int) -> dict[int, float]:
 
 
 def get_dry_stock(season_id: int) -> dict[int, float]:
-    """Остатки сухого по сортам: выход сушки − продано (продажи — Этап 4)."""
+    """Остатки сухого по сортам: выход сушки − продано."""
     db = get_db()
     out = {g["id"]: 0.0 for g in list_grades()}
 
@@ -240,7 +240,12 @@ def get_dry_stock(season_id: int) -> dict[int, float]:
     out[2] += float(r["d2"])
     out[3] += float(r["d3"])
 
-    # Продажи появятся в Этапе 4 — пока не вычитаем
+    for r in db.execute("""
+        SELECT grade_id, COALESCE(SUM(weight_kg), 0) AS kg
+        FROM sale WHERE season_id = ? GROUP BY grade_id
+    """, (season_id,)):
+        out[r["grade_id"]] -= float(r["kg"])
+
     return out
 
 
@@ -439,3 +444,208 @@ def get_drying_kg_by_date(date_: str, season_id: int) -> dict:
         FROM drying_run WHERE date = ? AND season_id = ?
     """, (date_, season_id)).fetchone()
     return {"raw": float(row["raw_total"]), "dry": float(row["dry_total"])}
+
+
+# --- Покупатели ---------------------------------------------------------------
+
+def list_buyers() -> list[dict]:
+    db = get_db()
+    return [dict(r) for r in db.execute("""
+        SELECT b.*,
+               (SELECT COUNT(*) FROM sale s WHERE s.buyer_id = b.id) AS uses
+        FROM buyer b
+        ORDER BY b.name
+    """)]
+
+
+def get_buyer(buyer_id: int) -> dict | None:
+    db = get_db()
+    row = db.execute("SELECT * FROM buyer WHERE id = ?", (buyer_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_buyer(name: str, phone: str | None, notes: str | None) -> int:
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO buyer (name, phone, notes) VALUES (?, ?, ?)",
+        (name.strip(), (phone or "").strip() or None, (notes or "").strip() or None),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def update_buyer(buyer_id: int, name: str, phone: str | None, notes: str | None) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE buyer SET name = ?, phone = ?, notes = ? WHERE id = ?",
+        (name.strip(), (phone or "").strip() or None, (notes or "").strip() or None, buyer_id),
+    )
+    db.commit()
+
+
+def delete_buyer(buyer_id: int) -> int:
+    """Удалить покупателя. Связанные продажи получат buyer_id = NULL.
+    Возвращает число затронутых продаж (для информации)."""
+    db = get_db()
+    affected = db.execute(
+        "SELECT COUNT(*) AS c FROM sale WHERE buyer_id = ?", (buyer_id,)
+    ).fetchone()["c"]
+    db.execute("UPDATE sale SET buyer_id = NULL WHERE buyer_id = ?", (buyer_id,))
+    db.execute("DELETE FROM buyer WHERE id = ?", (buyer_id,))
+    db.commit()
+    return affected
+
+
+# --- Продажи ------------------------------------------------------------------
+
+def add_sale(date_: str, season_id: int, buyer_id: int | None, grade_id: int,
+             weight_kg: float, price_per_kg: float) -> int:
+    total = round(float(weight_kg) * float(price_per_kg), 2)
+    db = get_db()
+    cur = db.execute("""
+        INSERT INTO sale
+            (date, season_id, buyer_id, grade_id, weight_kg, price_per_kg, total_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (date_, season_id, buyer_id or None, grade_id,
+          float(weight_kg), float(price_per_kg), total))
+    db.commit()
+    return cur.lastrowid
+
+
+def get_sale(sale_id: int) -> dict | None:
+    db = get_db()
+    row = db.execute("""
+        SELECT s.*, g.display_name AS grade_name, b.name AS buyer_name
+        FROM sale s
+        JOIN grade g ON g.id = s.grade_id
+        LEFT JOIN buyer b ON b.id = s.buyer_id
+        WHERE s.id = ?
+    """, (sale_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_sales_for_date(date_: str, season_id: int) -> list[dict]:
+    db = get_db()
+    return [dict(r) for r in db.execute("""
+        SELECT s.*, g.display_name AS grade_name, g.sort_order,
+               b.name AS buyer_name
+        FROM sale s
+        JOIN grade g ON g.id = s.grade_id
+        LEFT JOIN buyer b ON b.id = s.buyer_id
+        WHERE s.date = ? AND s.season_id = ?
+        ORDER BY s.id DESC
+    """, (date_, season_id))]
+
+
+def list_sales_for_season(season_id: int) -> list[dict]:
+    db = get_db()
+    return [dict(r) for r in db.execute("""
+        SELECT s.*, g.display_name AS grade_name, g.sort_order,
+               b.name AS buyer_name
+        FROM sale s
+        JOIN grade g ON g.id = s.grade_id
+        LEFT JOIN buyer b ON b.id = s.buyer_id
+        WHERE s.season_id = ?
+        ORDER BY s.date DESC, s.id DESC
+    """, (season_id,))]
+
+
+def delete_sale(sale_id: int) -> None:
+    db = get_db()
+    db.execute("DELETE FROM sale WHERE id = ?", (sale_id,))
+    db.commit()
+
+
+def get_sales_total_season(season_id: int) -> dict:
+    """Продажи за сезон: общая выручка, по сортам."""
+    db = get_db()
+    row = db.execute("""
+        SELECT
+            COALESCE(SUM(total_amount), 0) AS total,
+            COALESCE(SUM(weight_kg), 0) AS kg
+        FROM sale WHERE season_id = ?
+    """, (season_id,)).fetchone()
+    by_grade = {g["id"]: 0.0 for g in list_grades()}
+    for r in db.execute("""
+        SELECT grade_id, COALESCE(SUM(weight_kg), 0) AS kg
+        FROM sale WHERE season_id = ? GROUP BY grade_id
+    """, (season_id,)):
+        by_grade[r["grade_id"]] = float(r["kg"])
+    return {
+        "total_amount": float(row["total"] or 0),
+        "total_kg": float(row["kg"] or 0),
+        "by_grade_kg": by_grade,
+    }
+
+
+def get_sales_kg_by_date(date_: str, season_id: int) -> dict:
+    """Продано за день: кг и ₽."""
+    db = get_db()
+    row = db.execute("""
+        SELECT
+            COALESCE(SUM(weight_kg), 0) AS kg,
+            COALESCE(SUM(total_amount), 0) AS amount
+        FROM sale WHERE date = ? AND season_id = ?
+    """, (date_, season_id)).fetchone()
+    return {"kg": float(row["kg"]), "amount": float(row["amount"])}
+
+
+# --- Расходы (общие, не сушка) ------------------------------------------------
+
+def add_expense(date_: str, season_id: int, category: str, amount: float, notes: str | None) -> int:
+    db = get_db()
+    cur = db.execute("""
+        INSERT INTO expense (date, season_id, category, amount, notes)
+        VALUES (?, ?, ?, ?, ?)
+    """, (date_, season_id, category.strip(), float(amount), (notes or "").strip() or None))
+    db.commit()
+    return cur.lastrowid
+
+
+def list_expenses_for_date(date_: str, season_id: int) -> list[dict]:
+    db = get_db()
+    return [dict(r) for r in db.execute("""
+        SELECT * FROM expense
+        WHERE date = ? AND season_id = ?
+        ORDER BY id DESC
+    """, (date_, season_id))]
+
+
+def list_expenses_for_season(season_id: int) -> list[dict]:
+    db = get_db()
+    return [dict(r) for r in db.execute("""
+        SELECT * FROM expense
+        WHERE season_id = ?
+        ORDER BY date DESC, id DESC
+    """, (season_id,))]
+
+
+def delete_expense(record_id: int) -> None:
+    db = get_db()
+    db.execute("DELETE FROM expense WHERE id = ?", (record_id,))
+    db.commit()
+
+
+def get_expenses_total_season(season_id: int) -> dict:
+    """Расходы за сезон: общая сумма и по категориям."""
+    db = get_db()
+    row = db.execute("""
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM expense WHERE season_id = ?
+    """, (season_id,)).fetchone()
+    by_category = {}
+    for r in db.execute("""
+        SELECT category, COALESCE(SUM(amount), 0) AS amount
+        FROM expense WHERE season_id = ? GROUP BY category
+    """, (season_id,)):
+        by_category[r["category"]] = float(r["amount"])
+    return {"total": float(row["total"] or 0), "by_category": by_category}
+
+
+def get_expenses_by_date(date_: str, season_id: int) -> float:
+    db = get_db()
+    row = db.execute("""
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM expense WHERE date = ? AND season_id = ?
+    """, (date_, season_id)).fetchone()
+    return float(row["total"] or 0)
