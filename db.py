@@ -46,19 +46,28 @@ CREATE TABLE IF NOT EXISTS acceptance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
     season_id INTEGER NOT NULL REFERENCES season(id),
+    supplier_id INTEGER REFERENCES supplier(id),
+    notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS acceptance_grade (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    acceptance_id INTEGER NOT NULL REFERENCES acceptance(id) ON DELETE CASCADE,
     grade_id INTEGER NOT NULL REFERENCES grade(id),
     weight_kg REAL NOT NULL,
     price_per_kg REAL NOT NULL,
-    total_amount REAL NOT NULL,
-    supplier_id INTEGER REFERENCES supplier(id),
-    notes TEXT
+    total_amount REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS waste_record (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
     season_id INTEGER NOT NULL REFERENCES season(id),
-    weight_kg REAL NOT NULL
+    grade_1_kg REAL NOT NULL DEFAULT 0,
+    grade_2_kg REAL NOT NULL DEFAULT 0,
+    grade_3_kg REAL NOT NULL DEFAULT 0,
+    supplier_id INTEGER REFERENCES supplier(id),
+    notes TEXT
 );
 
 CREATE TABLE IF NOT EXISTS drying_run (
@@ -107,6 +116,8 @@ CREATE TABLE IF NOT EXISTS expense (
 
 CREATE INDEX IF NOT EXISTS idx_acceptance_date ON acceptance(date);
 CREATE INDEX IF NOT EXISTS idx_acceptance_season ON acceptance(season_id);
+CREATE INDEX IF NOT EXISTS idx_acceptance_grade_acc ON acceptance_grade(acceptance_id);
+CREATE INDEX IF NOT EXISTS idx_acceptance_grade_grade ON acceptance_grade(grade_id);
 CREATE INDEX IF NOT EXISTS idx_drying_date ON drying_run(date);
 CREATE INDEX IF NOT EXISTS idx_sale_date ON sale(date);
 CREATE INDEX IF NOT EXISTS idx_waste_date ON waste_record(date);

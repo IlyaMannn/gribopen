@@ -37,12 +37,48 @@
                        class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Вес мусора, кг</label>
-                <input type="number" step="0.01" min="0" inputmode="decimal" name="weight_kg" required autofocus
-                       placeholder="0"
-                       class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Поставщик (необязательно)</label>
+                <select name="supplier_id"
+                        class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                    <option value="">— не указывать —</option>
+                    {% for s in suppliers %}
+                        <option value="{{ s.id }}">{{ s.name }}{% if s.phone %} · {{ s.phone }}{% endif %}</option>
+                    {% endfor %}
+                </select>
             </div>
         </div>
+
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="hidden md:grid grid-cols-12 gap-2 px-3 py-2 bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+                <div class="col-span-4">Сорт</div>
+                <div class="col-span-4 text-right">Вес мусора, кг</div>
+                <div class="col-span-4"></div>
+            </div>
+            {% for g in grades %}
+            <div class="border-t border-gray-200 first:border-t-0 md:grid md:grid-cols-12 md:gap-2 md:items-center px-3 py-3 md:py-2">
+                <div class="md:col-span-4 text-sm font-medium text-gray-700">{{ g.display_name }}</div>
+                <div class="md:col-span-4 mt-2 md:mt-0">
+                    <input type="number" step="0.01" min="0" inputmode="decimal"
+                           name="weight_{{ g.id }}"
+                           placeholder="0"
+                           class="js-waste w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right"
+                           oninput="calcWaste()">
+                </div>
+                <div class="md:col-span-4"></div>
+            </div>
+            {% endfor %}
+            <div class="px-3 py-2 bg-gray-50 flex justify-between items-center border-t border-gray-200">
+                <span class="text-sm text-gray-600">Итого мусора:</span>
+                <span class="js-waste-total text-lg font-semibold text-gray-700">0,00 кг</span>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Заметка (необязательно)</label>
+            <input type="text" name="notes" maxlength="200"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        </div>
+
         <button type="submit"
                 class="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition">
             Записать
@@ -58,21 +94,53 @@
         {% if rows %}
             <ul class="divide-y divide-gray-100">
                 {% for r in rows %}
-                <li class="px-4 py-3 flex items-center justify-between">
-                    <div class="text-sm">
-                        <span class="font-semibold text-gray-700">{{ r.weight_kg|kg }}</span>
+                <li class="px-4 py-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="text-sm flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-medium text-gray-900">Запись #{{ r.id }}</span>
+                                {% if r.supplier_name %}
+                                <span class="text-gray-500">·</span>
+                                <span class="text-gray-700">{{ r.supplier_name }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="text-gray-700 font-semibold mt-0.5">{{ r.total_kg|kg }}</div>
+                            {% if r.notes %}
+                            <div class="text-xs text-gray-500 mt-0.5 truncate">{{ r.notes }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <a href="{{ url_for('waste_edit', record_id=r.id) }}"
+                               class="text-gray-500 hover:text-gray-700 p-1" title="Редактировать">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </a>
+                            <form method="post" action="{{ url_for('waste_delete', record_id=r.id) }}"
+                                  onsubmit="return confirm('Удалить запись мусора #{{ r.id }}?')">
+                                <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                    <form method="post" action="{{ url_for('waste_delete', record_id=r.id) }}"
-                          onsubmit="return confirm('Удалить запись мусора?')">
-                        <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
-                        </button>
-                    </form>
+                    <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">1 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_1_kg|kg }}</div>
+                        </div>
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">2 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_2_kg|kg }}</div>
+                        </div>
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">3 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_3_kg|kg }}</div>
+                        </div>
+                    </div>
                 </li>
                 {% endfor %}
             </ul>
 
-            {% set day_total = rows|sum(attribute='weight_kg') %}
+            {% set day_total = rows|sum(attribute='total_kg') %}
             <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex justify-between text-sm">
                 <span class="text-gray-600">Итого за день:</span>
                 <span class="font-semibold">{{ day_total|kg }}</span>
@@ -84,8 +152,16 @@
 
     {% if accepted_total_season > 0 %}
     <div class="bg-white rounded-2xl border border-gray-200 p-4">
-        <h2 class="font-medium text-gray-900 mb-2">Итог за сезон</h2>
-        <div class="grid grid-cols-3 gap-3 text-center">
+        <h2 class="font-medium text-gray-900 mb-2">Итог за сезон (по сортам)</h2>
+        <div class="grid grid-cols-3 gap-3 text-center mb-3">
+            {% for g in grades %}
+            <div>
+                <p class="text-xs text-gray-500">{{ g.display_name }}</p>
+                <p class="text-lg font-semibold text-gray-700">{{ waste_by_grade_season[g.id]|kg }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="grid grid-cols-3 gap-3 text-center pt-3 border-t border-gray-100">
             <div>
                 <p class="text-xs text-gray-500">Принято</p>
                 <p class="text-lg font-semibold text-gray-700">{{ accepted_total_season|kg }}</p>
@@ -104,4 +180,17 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+function calcWaste() {
+    let total = 0;
+    document.querySelectorAll('.js-waste').forEach(inp => {
+        const w = parseFloat((inp.value || '0').replace(',', '.')) || 0;
+        total += w;
+    });
+    document.querySelector('.js-waste-total').textContent =
+        total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' кг';
+}
+calcWaste();
+</script>
 {% endblock %}

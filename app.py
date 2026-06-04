@@ -11,7 +11,7 @@ from auth import (
     login_user, logout_user, current_user, login_required,
     verify_password, change_password,
 )
-from seed import seed_if_empty, has_active_season, get_active_season, create_season, list_seasons, get_season, set_active_season, rename_season, get_season_stats
+from seed import seed_if_empty, has_active_season, get_active_season, create_season, list_seasons, get_season, set_active_season, rename_season, update_season, delete_season, get_season_stats
 import models
 
 
@@ -166,23 +166,29 @@ def home():
     # Итоги за сегодня
     today = date.today().isoformat()
     today_rows = models.list_acceptance_for_date(today, season_id)
-    accepted_today_kg = sum(r["weight_kg"] for r in today_rows)
+    accepted_today_kg = sum(r["total_kg"] for r in today_rows)
     accepted_today_amount = sum(r["total_amount"] for r in today_rows)
     today_drying = models.get_drying_kg_by_date(today, season_id)
     waste_today = models.get_waste_kg_by_date(today, season_id)
     waste_pct_today = (waste_today / accepted_today_kg * 100) if accepted_today_kg > 0 else 0.0
     today_sales = models.get_sales_kg_by_date(today, season_id)
     today_expenses = models.get_expenses_by_date(today, season_id)
+    fridge_stock = models.get_fridge_stock(season_id)
+    cost = models.get_cost_per_kg_dry(season_id)
+    margin = models.get_margin(season_id)
 
     return render_template(
         "home.html",
         grades=grades,
         raw_stock=raw_stock,
         dry_stock=dry_stock,
+        fridge_stock=fridge_stock,
         season_totals=season_totals,
         season_yield=season_yield,
         season_sales=season_sales,
         season_expenses=season_expenses,
+        cost=cost,
+        margin=margin,
         accepted_today_kg=accepted_today_kg,
         accepted_today_amount=accepted_today_amount,
         today_drying=today_drying,
@@ -237,7 +243,7 @@ def acceptance():
         supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
         notes = request.form.get("notes") or ""
 
-        added = 0
+        grades_input = []
         for g in grades:
             w_raw = request.form.get(f"weight_{g['id']}") or ""
             p_raw = request.form.get(f"price_{g['id']}") or ""
@@ -249,22 +255,22 @@ def acceptance():
                 p = float(p_raw.replace(",", ".")) if p_raw.strip() else 0
             except ValueError:
                 p = 0
-
             if w > 0 and p >= 0:
-                models.add_acceptance(form_date, season_id, g["id"], w, p, supplier_id, notes)
-                added += 1
+                grades_input.append((g["id"], w, p))
 
-        if added:
-            flash(f"Сохранено записей: {added}", "ok")
+        if grades_input:
+            models.add_acceptance(form_date, season_id, grades_input, supplier_id, notes)
+            flash(f"Приёмка сохранена: {len(grades_input)} сорт(ов)", "ok")
         else:
             flash("Не введено ни одного значения веса", "err")
-        return redirect(url_for("acceptance"))
+        return redirect(url_for("acceptance", date=form_date))
 
     # GET
     selected_date = request.args.get("date") or today
     rows = models.list_acceptance_for_date(selected_date, season_id)
     latest_prices = models.latest_prices_dict(selected_date)
     raw_stock = models.get_raw_stock(season_id)
+    fridge_stock = models.get_fridge_stock(season_id)
 
     return render_template(
         "acceptance.html",
@@ -275,15 +281,87 @@ def acceptance():
         rows=rows,
         latest_prices=latest_prices,
         raw_stock=raw_stock,
+        fridge_stock=fridge_stock,
     )
 
 
-@app.route("/acceptance/<int:record_id>/delete", methods=["POST"])
+@app.route("/acceptance/<int:acceptance_id>/edit", methods=["GET", "POST"])
 @login_required
-def acceptance_delete(record_id):
-    models.delete_acceptance(record_id)
+def acceptance_edit(acceptance_id):
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    rec = models.get_acceptance(acceptance_id)
+    if rec is None:
+        flash("Запись не найдена", "err")
+        return redirect(url_for("acceptance"))
+
+    grades = models.list_grades()
+    suppliers = models.list_suppliers()
+    today = date.today().isoformat()
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or rec["date"]
+        supplier_id_raw = request.form.get("supplier_id") or ""
+        supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
+        notes = request.form.get("notes") or ""
+
+        grades_input = []
+        for g in grades:
+            w_raw = request.form.get(f"weight_{g['id']}") or ""
+            p_raw = request.form.get(f"price_{g['id']}") or ""
+            try:
+                w = float(w_raw.replace(",", ".")) if w_raw.strip() else 0
+            except ValueError:
+                w = 0
+            try:
+                p = float(p_raw.replace(",", ".")) if p_raw.strip() else 0
+            except ValueError:
+                p = 0
+            if w > 0 and p >= 0:
+                grades_input.append((g["id"], w, p))
+
+        models.update_acceptance(acceptance_id, form_date, grades_input, supplier_id, notes)
+        flash("Приёмка обновлена", "ok")
+        return redirect(url_for("acceptance", date=form_date))
+
+    latest_prices = models.latest_prices_dict(rec["date"])
+    return render_template(
+        "acceptance_edit.html",
+        rec=rec,
+        grades=grades,
+        suppliers=suppliers,
+        latest_prices=latest_prices,
+        today=today,
+    )
+
+
+@app.route("/acceptance/<int:acceptance_id>/delete", methods=["POST"])
+@login_required
+def acceptance_delete(acceptance_id):
+    rec = models.get_acceptance(acceptance_id)
+    if rec is None:
+        flash("Запись не найдена", "err")
+        return redirect(url_for("acceptance"))
+    models.delete_acceptance(acceptance_id)
     flash("Запись удалена", "ok")
-    return redirect(request.referrer or url_for("acceptance"))
+    return redirect(url_for("acceptance", date=rec["date"]))
+
+
+@app.route("/acceptance/quick-supplier", methods=["POST"])
+@login_required
+def acceptance_quick_supplier():
+    """Быстрое создание поставщика прямо с приёмки. Возврат на /acceptance?date=..."""
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not name:
+        flash("Имя поставщика обязательно", "err")
+        return redirect(request.referrer or url_for("acceptance"))
+    new_id = models.add_supplier(name, phone, notes)
+    flash(f"Поставщик «{name}» добавлен", "ok")
+    target_date = request.form.get("date") or date.today().isoformat()
+    return redirect(url_for("acceptance", date=target_date) + f"&new_supplier={new_id}")
 
 
 # --- Справочники --------------------------------------------------------------
@@ -508,24 +586,38 @@ def waste():
         return redirect(url_for("first_run"))
     season_id = season["id"]
     today = date.today().isoformat()
+    grades = models.list_grades()
+    suppliers = models.list_suppliers()
 
     if request.method == "POST":
         form_date = request.form.get("date") or today
-        w = _parse_kg(request.form.get("weight_kg"))
-        if w <= 0:
-            flash("Введите вес больше 0", "err")
-            return redirect(url_for("waste"))
-        models.add_waste_record(form_date, season_id, w)
-        flash(f"Записан мусор: {w:.2f} кг", "ok")
-        return redirect(url_for("waste"))
+        kg_by_grade = {}
+        total = 0.0
+        for g in grades:
+            w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            if w < 0:
+                w = 0
+            kg_by_grade[g["id"]] = w
+            total += w
+        if total <= 0:
+            flash("Введите вес больше 0 хотя бы по одному сорту", "err")
+            return redirect(url_for("waste", date=form_date))
+        supplier_id_raw = request.form.get("supplier_id") or ""
+        supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
+        notes = request.form.get("notes") or ""
+        models.add_waste_record(form_date, season_id, kg_by_grade, supplier_id, notes)
+        flash(f"Записан мусор: {total:.2f} кг", "ok")
+        return redirect(url_for("waste", date=form_date))
 
     # GET
     selected_date = request.args.get("date") or today
     rows = models.list_waste_records_for_date(selected_date, season_id)
     accepted_today = models.get_accepted_kg_by_date(selected_date, season_id)
     waste_today = models.get_waste_kg_by_date(selected_date, season_id)
+    waste_by_grade_today = models.get_waste_kg_by_date_by_grade(selected_date, season_id)
     waste_pct = (waste_today / accepted_today * 100) if accepted_today > 0 else 0.0
     waste_total_season = models.get_waste_total_season(season_id)
+    waste_by_grade_season = models.get_waste_total_season_by_grade(season_id)
     accepted_total_season = models.get_raw_stock_total_season(season_id)["total_kg"]
     waste_pct_season = (waste_total_season / accepted_total_season * 100) if accepted_total_season > 0 else 0.0
 
@@ -534,21 +626,67 @@ def waste():
         today=today,
         selected_date=selected_date,
         rows=rows,
+        grades=grades,
+        suppliers=suppliers,
         accepted_today=accepted_today,
         waste_today=waste_today,
+        waste_by_grade_today=waste_by_grade_today,
         waste_pct=waste_pct,
         waste_total_season=waste_total_season,
+        waste_by_grade_season=waste_by_grade_season,
         accepted_total_season=accepted_total_season,
         waste_pct_season=waste_pct_season,
+    )
+
+
+@app.route("/waste/<int:record_id>/edit", methods=["GET", "POST"])
+@login_required
+def waste_edit(record_id):
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    rec = models.get_waste_record(record_id)
+    if rec is None:
+        flash("Запись не найдена", "err")
+        return redirect(url_for("waste"))
+    grades = models.list_grades()
+    suppliers = models.list_suppliers()
+    today = date.today().isoformat()
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or rec["date"]
+        kg_by_grade = {}
+        for g in grades:
+            w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            if w < 0:
+                w = 0
+            kg_by_grade[g["id"]] = w
+        supplier_id_raw = request.form.get("supplier_id") or ""
+        supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
+        notes = request.form.get("notes") or ""
+        models.update_waste_record(record_id, form_date, kg_by_grade, supplier_id, notes)
+        flash("Запись мусора обновлена", "ok")
+        return redirect(url_for("waste", date=form_date))
+
+    return render_template(
+        "waste_edit.html",
+        rec=rec,
+        grades=grades,
+        suppliers=suppliers,
+        today=today,
     )
 
 
 @app.route("/waste/<int:record_id>/delete", methods=["POST"])
 @login_required
 def waste_delete(record_id):
+    rec = models.get_waste_record(record_id)
+    if rec is None:
+        flash("Запись не найдена", "err")
+        return redirect(url_for("waste"))
     models.delete_waste_record(record_id)
     flash("Запись удалена", "ok")
-    return redirect(request.referrer or url_for("waste"))
+    return redirect(url_for("waste", date=rec["date"]))
 
 
 # --- Продажи -------------------------------------------------------------------
@@ -707,6 +845,45 @@ def seasons_rename(season_id):
     return redirect(url_for("seasons"))
 
 
+@app.route("/seasons/<int:season_id>/edit", methods=["GET", "POST"])
+@login_required
+def seasons_edit(season_id):
+    s = get_season(season_id)
+    if s is None:
+        flash("Сезон не найден", "err")
+        return redirect(url_for("seasons"))
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        start_date = request.form.get("start_date") or s["start_date"]
+        end_date_raw = request.form.get("end_date") or ""
+        end_date = end_date_raw or None
+        if not name:
+            flash("Название не может быть пустым", "err")
+            return redirect(url_for("seasons_edit", season_id=season_id))
+        update_season(season_id, name, start_date, end_date)
+        flash("Сезон обновлён", "ok")
+        return redirect(url_for("seasons"))
+    return render_template("seasons_edit.html", s=s, today=date.today().isoformat())
+
+
+@app.route("/seasons/<int:season_id>/delete", methods=["POST"])
+@login_required
+def seasons_delete(season_id):
+    s = get_season(season_id)
+    if s is None:
+        flash("Сезон не найден", "err")
+        return redirect(url_for("seasons"))
+    if s["is_active"]:
+        flash("Нельзя удалить активный сезон. Сначала активируйте другой.", "err")
+        return redirect(url_for("seasons"))
+    affected = delete_season(season_id)
+    if affected:
+        flash(f"Сезон «{s['name']}» удалён. Затронуто связанных записей: {affected}.", "ok")
+    else:
+        flash(f"Сезон «{s['name']}» удалён", "ok")
+    return redirect(url_for("seasons"))
+
+
 # --- Отчёты --------------------------------------------------------------------
 
 @app.route("/reports")
@@ -744,6 +921,13 @@ def reports():
     suppliers = models.supplier_summary(season_id, date_from, date_to)
     buyers = models.buyer_summary(season_id, date_from, date_to)
     daily = models.daily_summary(season_id, date_from, date_to)
+    cost = models.get_cost_per_kg_dry(season_id, date_from, date_to)
+    margin = models.get_margin(season_id, date_from, date_to)
+    movement = models.get_grade_movement(season_id, date_from, date_to)
+    supp_eff = models.get_supplier_efficiency(season_id, date_from, date_to)
+    yield_trend = models.get_yield_trend(season_id, date_from, date_to)
+    top_grades = models.get_top_grades(season_id, date_from, date_to)
+    cashflow = models.get_cashflow(season_id, date_from, date_to)
 
     return render_template(
         "reports.html",
@@ -751,6 +935,13 @@ def reports():
         suppliers=suppliers,
         buyers=buyers,
         daily=daily,
+        cost=cost,
+        margin=margin,
+        movement=movement,
+        supp_eff=supp_eff,
+        yield_trend=yield_trend,
+        top_grades=top_grades,
+        cashflow=cashflow,
         preset=preset,
         date_from=date_from or "",
         date_to=date_to or "",
@@ -822,7 +1013,7 @@ def reports_export_csv():
             writer.writerow([b["buyer_name"] or "(без имени)", b["deals"],
                              f"{b['kg']:.2f}", f"{b['amount']:.2f}"])
         fname = "buyers.csv"
-    else:  # daily
+    elif section == "daily":
         daily = models.daily_summary(season_id, date_from, date_to)
         writer.writerow(["Дата", "Принято кг", "Принято ₽", "В сушку кг", "Получено сух кг",
                          "Расходы сушка ₽", "Мусор кг", "Продано кг", "Выручка ₽",
@@ -835,6 +1026,67 @@ def reports_export_csv():
                              f"{d['sales_kg']:.2f}", f"{d['revenue']:.2f}",
                              f"{d['expenses_total']:.2f}", f"{d['profit']:.2f}"])
         fname = "daily.csv"
+    elif section == "costs":
+        cost = models.get_cost_per_kg_dry(season_id, date_from, date_to)
+        writer.writerow(["Показатель", "Значение"])
+        writer.writerow(["Вложено в приёмку, ₽", f"{cost['accepted_amount']:.2f}"])
+        writer.writerow(["Расходы на сушку, ₽", f"{cost['drying_cost']:.2f}"])
+        writer.writerow(["Общие расходы, ₽", f"{cost['expenses']:.2f}"])
+        writer.writerow(["Всего вложено, ₽", f"{cost['total_invested']:.2f}"])
+        writer.writerow(["Продано, кг", f"{cost['sold_kg']:.2f}"])
+        writer.writerow(["Сухой остаток, кг", f"{cost['dry_stock_kg']:.2f}"])
+        writer.writerow(["Себестоимость 1 кг сухого, ₽", f"{cost['cost_per_kg']:.2f}"])
+        fname = "costs.csv"
+    elif section == "margin":
+        m = models.get_margin(season_id, date_from, date_to)
+        writer.writerow(["Показатель", "Значение"])
+        writer.writerow(["Выручка, ₽", f"{m['revenue']:.2f}"])
+        writer.writerow(["Всего расходов, ₽", f"{m['total_cost']:.2f}"])
+        writer.writerow(["Прибыль, ₽", f"{m['profit']:.2f}"])
+        writer.writerow(["Рентабельность, %", f"{m['margin_pct']:.2f}"])
+        fname = "margin.csv"
+    elif section == "movement":
+        m = models.get_grade_movement(season_id, date_from, date_to)
+        writer.writerow(["Сорт", "Принято кг", "Мусор кг", "В сушку кг", "Выход кг",
+                         "Продано кг", "Сырьё остаток кг", "Сухой остаток кг"])
+        for r in m:
+            writer.writerow([r["grade_name"], f"{r['accepted_kg']:.2f}",
+                             f"{r['waste_kg']:.2f}", f"{r['drying_raw_kg']:.2f}",
+                             f"{r['drying_dry_kg']:.2f}", f"{r['sold_kg']:.2f}",
+                             f"{r['raw_stock_kg']:.2f}", f"{r['dry_stock_kg']:.2f}"])
+        fname = "movement.csv"
+    elif section == "suppliers_eff":
+        se = models.get_supplier_efficiency(season_id, date_from, date_to)
+        writer.writerow(["Поставщик", "Принято кг", "Выплачено ₽", "Мусор кг", "% мусора", "Записей"])
+        for r in se:
+            writer.writerow([r["supplier_name"] or "(без имени)",
+                             f"{r['accepted_kg']:.2f}", f"{r['paid_amount']:.2f}",
+                             f"{r['waste_kg']:.2f}", f"{r['waste_pct']:.2f}", r["deliveries"]])
+        fname = "suppliers_eff.csv"
+    elif section == "yield":
+        y = models.get_yield_trend(season_id, date_from, date_to)
+        writer.writerow(["Дата", "Загружено кг", "Получено кг", "Выход %"])
+        for r in y:
+            writer.writerow([r["date"], f"{r['raw_kg']:.2f}",
+                             f"{r['dry_kg']:.2f}", f"{r['yield_pct']:.2f}"])
+        fname = "yield.csv"
+    elif section == "top":
+        t = models.get_top_grades(season_id, date_from, date_to)
+        writer.writerow(["Сорт", "Продано кг", "Выручка ₽", "Сделок"])
+        for r in t:
+            writer.writerow([r["grade_name"], f"{r['sold_kg']:.2f}",
+                             f"{r['revenue']:.2f}", r["deals"]])
+        fname = "top.csv"
+    elif section == "cashflow":
+        cf = models.get_cashflow(season_id, date_from, date_to)
+        writer.writerow(["Дата", "Приход ₽", "Отток ₽", "Нетто ₽"])
+        for r in cf["rows"]:
+            writer.writerow([r["date"], f"{r['inflow']:.2f}",
+                             f"{r['outflow']:.2f}", f"{r['net']:.2f}"])
+        writer.writerow([])
+        writer.writerow(["ИТОГО", f"{cf['inflow_total']:.2f}",
+                         f"{cf['outflow_total']:.2f}", f"{cf['net_total']:.2f}"])
+        fname = "cashflow.csv"
 
     data = buf.getvalue()
     season_name = season["name"].replace(" ", "_")

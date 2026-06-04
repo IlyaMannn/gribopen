@@ -1,4 +1,5 @@
 """Сид начальных данных: пользователь admin/admin и 3 сорта гриба."""
+from datetime import date
 from db import get_db
 from auth import hash_password
 
@@ -97,13 +98,51 @@ def rename_season(season_id: int, name: str) -> None:
     db.commit()
 
 
+def update_season(season_id: int, name: str, start_date: str, end_date: str | None) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE season SET name = ?, start_date = ?, end_date = ? WHERE id = ?",
+        (name.strip(), start_date, end_date, season_id),
+    )
+    db.commit()
+
+
+def delete_season(season_id: int) -> int:
+    """Hard delete сезона и всех связанных записей каскадно.
+    Возвращает общее число затронутых строк (для информации)."""
+    db = get_db()
+    total = 0
+    # acceptance_grade удалится каскадно через acceptance
+    cur = db.execute("SELECT COUNT(*) AS c FROM acceptance_grade ag "
+                     "JOIN acceptance a ON a.id = ag.acceptance_id WHERE a.season_id = ?",
+                     (season_id,))
+    total += cur.fetchone()["c"]
+    db.execute("DELETE FROM acceptance WHERE season_id = ?", (season_id,))
+    cur = db.execute("SELECT COUNT(*) AS c FROM waste_record WHERE season_id = ?", (season_id,))
+    total += cur.fetchone()["c"]
+    db.execute("DELETE FROM waste_record WHERE season_id = ?", (season_id,))
+    cur = db.execute("SELECT COUNT(*) AS c FROM drying_run WHERE season_id = ?", (season_id,))
+    total += cur.fetchone()["c"]
+    db.execute("DELETE FROM drying_run WHERE season_id = ?", (season_id,))
+    cur = db.execute("SELECT COUNT(*) AS c FROM sale WHERE season_id = ?", (season_id,))
+    total += cur.fetchone()["c"]
+    db.execute("DELETE FROM sale WHERE season_id = ?", (season_id,))
+    cur = db.execute("SELECT COUNT(*) AS c FROM expense WHERE season_id = ?", (season_id,))
+    total += cur.fetchone()["c"]
+    db.execute("DELETE FROM expense WHERE season_id = ?", (season_id,))
+    db.execute("DELETE FROM season WHERE id = ?", (season_id,))
+    db.commit()
+    return total
+
+
 def get_season_stats(season_id: int) -> dict:
     """Сводка по сезону: сколько приняли/высушили/продали/потратили."""
     db = get_db()
     accepted = db.execute(
-        "SELECT COALESCE(SUM(weight_kg), 0) AS kg, "
-        "COALESCE(SUM(total_amount), 0) AS amount "
-        "FROM acceptance WHERE season_id = ?", (season_id,)
+        "SELECT COALESCE(SUM(ag.weight_kg), 0) AS kg, "
+        "COALESCE(SUM(ag.total_amount), 0) AS amount "
+        "FROM acceptance_grade ag "
+        "JOIN acceptance a ON a.id = ag.acceptance_id WHERE a.season_id = ?", (season_id,)
     ).fetchone()
     dried = db.execute(
         "SELECT "
@@ -122,7 +161,8 @@ def get_season_stats(season_id: int) -> dict:
         "FROM drying_run WHERE season_id = ?", (season_id,)
     ).fetchone()
     waste = db.execute(
-        "SELECT COALESCE(SUM(weight_kg), 0) AS kg FROM waste_record WHERE season_id = ?",
+        "SELECT COALESCE(SUM(grade_1_kg + grade_2_kg + grade_3_kg), 0) AS kg "
+        "FROM waste_record WHERE season_id = ?",
         (season_id,)
     ).fetchone()
     expenses = db.execute(

@@ -81,4 +81,11 @@ input[type="date"], input[type="email"], select, textarea {
     table { page-break-inside: auto; }
     tr { page-break-inside: avoid; }
     h2 { page-break-after: avoid; }
+    /* На печати показываем таблицу, прячем карточки */
+    .md\\:hidden { display: none !important; }
+    .hidden.md\\:block, .hidden { display: revert !important; }
 }
+
+/* Утилита для горизонтального скролла таблиц (тонкий скроллбар) */
+.overflow-x-auto::-webkit-scrollbar { height: 6px; }
+.overflow-x-auto::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
