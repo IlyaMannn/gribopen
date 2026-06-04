@@ -9,7 +9,7 @@ from auth import (
     login_user, logout_user, current_user, login_required,
     verify_password, change_password,
 )
-from seed import seed_if_empty, has_active_season, get_active_season, create_season
+from seed import seed_if_empty, has_active_season, get_active_season, create_season, list_seasons, get_season, set_active_season, rename_season, get_season_stats
 import models
 
 
@@ -654,19 +654,62 @@ def expenses_delete(expense_id):
     return redirect(request.referrer or url_for("expenses"))
 
 
+# --- Сезоны --------------------------------------------------------------------
+
+@app.route("/seasons", methods=["GET", "POST"])
+@login_required
+def seasons():
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        start_date = request.form.get("start_date") or date.today().isoformat()
+        if not name:
+            flash("Название сезона обязательно", "err")
+            return redirect(url_for("seasons"))
+        new_id = create_season(name, start_date)
+        flash(f"Сезон «{name}» создан и активирован", "ok")
+        return redirect(url_for("seasons"))
+
+    rows = list_seasons()
+    # Считаем статистику по каждому сезону
+    seasons_data = []
+    for s in rows:
+        stats = get_season_stats(s["id"])
+        seasons_data.append({**dict(s), "stats": stats})
+    return render_template("seasons.html", seasons=seasons_data, today=date.today().isoformat())
+
+
+@app.route("/seasons/<int:season_id>/activate", methods=["POST"])
+@login_required
+def seasons_activate(season_id):
+    s = get_season(season_id)
+    if s is None:
+        flash("Сезон не найден", "err")
+        return redirect(url_for("seasons"))
+    if s["is_active"]:
+        flash("Этот сезон уже активен", "ok")
+        return redirect(url_for("seasons"))
+    old_id = set_active_season(season_id)
+    flash(f"Активен сезон «{s['name']}»", "ok")
+    return redirect(url_for("seasons"))
+
+
+@app.route("/seasons/<int:season_id>/rename", methods=["POST"])
+@login_required
+def seasons_rename(season_id):
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("Название не может быть пустым", "err")
+        return redirect(url_for("seasons"))
+    rename_season(season_id, name)
+    flash("Сезон переименован", "ok")
+    return redirect(url_for("seasons"))
+
+
 # --- Заглушки остальных разделов ----------------------------------------------
 
 PLACEHOLDERS = {
-    "seasons": ("Сезоны", 5),
     "reports": ("Отчёты", 6),
 }
-
-
-@app.route("/seasons")
-@login_required
-def seasons():
-    return render_template("placeholder.html", title=PLACEHOLDERS["seasons"][0],
-                           stage=PLACEHOLDERS["seasons"][1])
 
 
 @app.route("/reports")

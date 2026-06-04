@@ -20,9 +20,9 @@
         </a>
         <div class="flex items-center gap-3 text-sm">
             {% if active_season %}
-                <span class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-md font-medium">
+                <a href="{{ url_for('seasons') }}" class="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-md font-medium hover:bg-emerald-100">
                     {{ active_season.name }}
-                </span>
+                </a>
             {% endif %}
             <details class="relative">
                 <summary class="list-none cursor-pointer flex items-center gap-1 text-gray-600 hover:text-gray-900">
