@@ -1,5 +1,5 @@
 """Flask-приложение: маршруты, маршрутизация, запуск."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, abort,
@@ -705,18 +705,55 @@ def seasons_rename(season_id):
     return redirect(url_for("seasons"))
 
 
-# --- Заглушки остальных разделов ----------------------------------------------
-
-PLACEHOLDERS = {
-    "reports": ("Отчёты", 6),
-}
-
+# --- Отчёты --------------------------------------------------------------------
 
 @app.route("/reports")
 @login_required
 def reports():
-    return render_template("placeholder.html", title=PLACEHOLDERS["reports"][0],
-                           stage=PLACEHOLDERS["reports"][1])
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    today = date.today()
+
+    # Пресеты: season, today, yesterday, week, month, all
+    preset = request.args.get("preset", "season")
+    date_from = request.args.get("date_from", "").strip() or None
+    date_to = request.args.get("date_to", "").strip() or None
+
+    if not date_from and not date_to:
+        if preset == "today":
+            date_from = date_to = today.isoformat()
+        elif preset == "yesterday":
+            y = today - timedelta(days=1)
+            date_from = date_to = y.isoformat()
+        elif preset == "week":
+            date_from = (today - timedelta(days=6)).isoformat()
+            date_to = today.isoformat()
+        elif preset == "month":
+            date_from = today.replace(day=1).isoformat()
+            date_to = today.isoformat()
+        elif preset == "season":
+            date_from = season["start_date"]
+            date_to = season["end_date"] or today.isoformat()
+        # else: all time (both None)
+
+    pnl = models.pnl_by_period(season_id, date_from, date_to)
+    suppliers = models.supplier_summary(season_id, date_from, date_to)
+    buyers = models.buyer_summary(season_id, date_from, date_to)
+    daily = models.daily_summary(season_id, date_from, date_to)
+
+    return render_template(
+        "reports.html",
+        pnl=pnl,
+        suppliers=suppliers,
+        buyers=buyers,
+        daily=daily,
+        preset=preset,
+        date_from=date_from or "",
+        date_to=date_to or "",
+        season=season,
+    )
 
 
 # --- Запуск -------------------------------------------------------------------

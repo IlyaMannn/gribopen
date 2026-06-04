@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Отчёты — Учёт грибов{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-4">
+    <h1 class="text-xl font-semibold text-gray-900 px-1">Отчёты</h1>
+
+    <!-- Пресеты -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-3">
+        <div class="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1">
+            {% set presets = [
+                ('season', 'Сезон'),
+                ('today', 'Сегодня'),
+                ('yesterday', 'Вчера'),
+                ('week', 'Неделя'),
+                ('month', 'Месяц'),
+                ('all', 'Всё время'),
+            ] %}
+            {% for key, label in presets %}
+            <a href="{{ url_for('reports', preset=key) }}"
+               class="px-3 py-1.5 rounded-full text-sm whitespace-nowrap
+                      {% if preset == key %}bg-emerald-600 text-white font-medium{% else %}bg-gray-100 text-gray-700 hover:bg-gray-200{% endif %}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <!-- Произвольный период -->
+        <form method="get" class="flex flex-wrap items-end gap-2 pt-2 border-t border-gray-100 mt-2">
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">С</label>
+                <input type="date" name="date_from" value="{{ date_from }}"
+                       class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">По</label>
+                <input type="date" name="date_to" value="{{ date_to }}"
+                       class="px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+            <button type="submit" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium text-gray-700">
+                Применить
+            </button>
+            {% if date_from or date_to %}
+            <a href="{{ url_for('reports') }}" class="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 underline">сбросить</a>
+            {% endif %}
+        </form>
+
+        <p class="text-xs text-gray-500 mt-2 px-1">
+            {% if date_from and date_to and date_from == date_to %}
+            Период: <strong>{{ date_from|dmy }}</strong>
+            {% elif date_from and date_to %}
+            Период: <strong>{{ date_from|dmy }} — {{ date_to|dmy }}</strong>
+            {% elif date_from %}
+            С <strong>{{ date_from|dmy }}</strong>
+            {% elif date_to %}
+            По <strong>{{ date_to|dmy }}</strong>
+            {% else %}
+            Весь период
+            {% endif %}
+            · сезон «{{ season.name }}»
+        </p>
+    </div>
+
+    <!-- 1. Сводка P&L -->
+    <section class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-3">Сводка</h2>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div>
+                <p class="text-xs text-gray-500">Принято</p>
+                <p class="text-lg font-semibold text-gray-700">{{ pnl.accepted_kg|kg }}</p>
+                <p class="text-xs text-gray-500">{{ pnl.accepted_amount|money }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">Высушено</p>
+                <p class="text-lg font-semibold text-gray-700">{{ pnl.dried_dry_kg|kg }}</p>
+                <p class="text-xs text-gray-500">из {{ pnl.dried_raw_kg|kg }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">Продано</p>
+                <p class="text-lg font-semibold text-emerald-700">{{ pnl.sales_kg|kg }}</p>
+                <p class="text-xs text-emerald-700">{{ pnl.revenue|money }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">Мусор</p>
+                <p class="text-lg font-semibold text-gray-700">{{ pnl.waste_kg|kg }}</p>
+            </div>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-gray-100 space-y-1.5 text-sm">
+            <div class="flex justify-between">
+                <span class="text-gray-600">Выручка</span>
+                <span class="font-semibold text-emerald-700">{{ pnl.revenue|money }}</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-600">− Расходы на сушку</span>
+                <span class="text-red-600">−{{ pnl.drying_cost|money }}</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-600">− Общие расходы</span>
+                <span class="text-red-600">−{{ pnl.expenses_total|money }}</span>
+            </div>
+            <div class="flex justify-between text-xs text-gray-400">
+                <span>Всего расходов</span>
+                <span>{{ pnl.total_cost|money }}</span>
+            </div>
+            <div class="flex justify-between pt-2 border-t border-gray-100 text-base">
+                <span class="font-medium text-gray-900">Прибыль</span>
+                <span class="font-semibold {% if pnl.profit >= 0 %}text-emerald-700{% else %}text-red-600{% endif %}">
+                    {{ pnl.profit|money }}
+                </span>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. По поставщикам -->
+    <section class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h2 class="font-medium text-gray-900">По поставщикам</h2>
+        </div>
+        {% if suppliers %}
+        <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 uppercase">
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-4 font-medium">Поставщик</th>
+                        <th class="text-right py-2 px-4 font-medium">Записей</th>
+                        <th class="text-right py-2 px-4 font-medium">Кг</th>
+                        <th class="text-right py-2 px-4 font-medium">Сумма</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% set s_kg = namespace(t=0) %}
+                    {% set s_amt = namespace(t=0) %}
+                    {% for s in suppliers %}
+                    <tr>
+                        <td class="py-2 px-4 text-gray-700">
+                            {% if s.supplier_name %}{{ s.supplier_name }}{% else %}<em class="text-gray-400">без имени</em>{% endif %}
+                        </td>
+                        <td class="py-2 px-4 text-right text-gray-500">{{ s.deliveries }}</td>
+                        <td class="py-2 px-4 text-right font-semibold">{{ s.kg|kg }}</td>
+                        <td class="py-2 px-4 text-right font-semibold text-gray-900">{{ s.amount|money }}</td>
+                    </tr>
+                    {% set s_kg.t = s_kg.t + s.kg %}
+                    {% set s_amt.t = s_amt.t + s.amount %}
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="border-t-2 border-gray-200 bg-gray-50">
+                        <td class="py-2 px-4 font-medium text-gray-900">Итого</td>
+                        <td class="py-2 px-4"></td>
+                        <td class="py-2 px-4 text-right font-semibold">{{ s_kg.t|kg }}</td>
+                        <td class="py-2 px-4 text-right font-semibold text-gray-900">{{ s_amt.t|money }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет приёмок в этом периоде</p>
+        {% endif %}
+    </section>
+
+    <!-- 3. По покупателям -->
+    <section class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h2 class="font-medium text-gray-900">По покупателям</h2>
+        </div>
+        {% if buyers %}
+        <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 uppercase">
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-4 font-medium">Покупатель</th>
+                        <th class="text-right py-2 px-4 font-medium">Сделок</th>
+                        <th class="text-right py-2 px-4 font-medium">Кг</th>
+                        <th class="text-right py-2 px-4 font-medium">Выручка</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% set b_kg = namespace(t=0) %}
+                    {% set b_amt = namespace(t=0) %}
+                    {% for b in buyers %}
+                    <tr>
+                        <td class="py-2 px-4 text-gray-700">
+                            {% if b.buyer_name %}{{ b.buyer_name }}{% else %}<em class="text-gray-400">без имени</em>{% endif %}
+                        </td>
+                        <td class="py-2 px-4 text-right text-gray-500">{{ b.deals }}</td>
+                        <td class="py-2 px-4 text-right font-semibold">{{ b.kg|kg }}</td>
+                        <td class="py-2 px-4 text-right font-semibold text-emerald-700">{{ b.amount|money }}</td>
+                    </tr>
+                    {% set b_kg.t = b_kg.t + b.kg %}
+                    {% set b_amt.t = b_amt.t + b.amount %}
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="border-t-2 border-gray-200 bg-gray-50">
+                        <td class="py-2 px-4 font-medium text-gray-900">Итого</td>
+                        <td class="py-2 px-4"></td>
+                        <td class="py-2 px-4 text-right font-semibold">{{ b_kg.t|kg }}</td>
+                        <td class="py-2 px-4 text-right font-semibold text-emerald-700">{{ b_amt.t|money }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет продаж в этом периоде</p>
+        {% endif %}
+    </section>
+
+    <!-- 4. По дням -->
+    <section class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h2 class="font-medium text-gray-900">По дням</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Только дни с движением (приёмка, сушка, продажа, расходы)</p>
+        </div>
+        {% if daily %}
+        <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 uppercase">
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-4 font-medium">Дата</th>
+                        <th class="text-right py-2 px-4 font-medium">Принято</th>
+                        <th class="text-right py-2 px-4 font-medium">Сушка</th>
+                        <th class="text-right py-2 px-4 font-medium">Продано</th>
+                        <th class="text-right py-2 px-4 font-medium">Расх.</th>
+                        <th class="text-right py-2 px-4 font-medium">Прибыль</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for d in daily %}
+                    <tr>
+                        <td class="py-2 px-4 text-gray-700">{{ d.date|dmy }}</td>
+                        <td class="py-2 px-4 text-right">
+                            <div class="text-gray-700">{{ d.accepted_kg|kg }}</div>
+                            <div class="text-xs text-gray-500">{{ d.accepted_amount|money }}</div>
+                        </td>
+                        <td class="py-2 px-4 text-right">
+                            <div class="text-gray-700">{{ d.dried_dry_kg|kg }}</div>
+                            <div class="text-xs text-gray-500">из {{ d.dried_raw_kg|kg }}</div>
+                        </td>
+                        <td class="py-2 px-4 text-right">
+                            <div class="text-emerald-700 font-semibold">{{ d.sales_kg|kg }}</div>
+                            <div class="text-xs text-emerald-700">{{ d.revenue|money }}</div>
+                        </td>
+                        <td class="py-2 px-4 text-right text-red-600">
+                            {{ (d.expenses_total + d.drying_cost)|money }}
+                        </td>
+                        <td class="py-2 px-4 text-right font-semibold {% if d.profit >= 0 %}text-emerald-700{% else %}text-red-600{% endif %}">
+                            {{ d.profit|money }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет движения в этом периоде</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
