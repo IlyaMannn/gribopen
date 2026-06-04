@@ -10,6 +10,7 @@ from auth import (
     verify_password, change_password,
 )
 from seed import seed_if_empty, has_active_season, get_active_season, create_season
+import models
 
 
 app = Flask(__name__)
@@ -147,8 +148,30 @@ def first_run():
 @app.route("/")
 @login_required
 def home():
-    """Главная: пока заглушка, остатки/быстрые действия — в Этапе 6."""
-    return render_template("home.html")
+    """Главная: остатки, итоги дня, быстрые действия."""
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    grades = models.list_grades()
+    raw_stock = models.get_raw_stock(season_id)
+    season_totals = models.get_raw_stock_total_season(season_id)
+
+    # Итоги за сегодня
+    today = date.today().isoformat()
+    today_rows = models.list_acceptance_for_date(today, season_id)
+    accepted_today_kg = sum(r["weight_kg"] for r in today_rows)
+    accepted_today_amount = sum(r["total_amount"] for r in today_rows)
+
+    return render_template(
+        "home.html",
+        grades=grades,
+        raw_stock=raw_stock,
+        season_totals=season_totals,
+        accepted_today_kg=accepted_today_kg,
+        accepted_today_amount=accepted_today_amount,
+        today=today,
+    )
 
 
 @app.route("/settings", methods=["GET"])
@@ -175,25 +198,166 @@ def settings_change_password():
     return redirect(url_for("settings"))
 
 
-# --- Заглушки разделов --------------------------------------------------------
+# --- Приёмка ------------------------------------------------------------------
+
+@app.route("/acceptance", methods=["GET", "POST"])
+@login_required
+def acceptance():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    grades = models.list_grades()
+    suppliers = models.list_suppliers()
+    today = date.today().isoformat()
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or today
+        supplier_id_raw = request.form.get("supplier_id") or ""
+        supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
+        notes = request.form.get("notes") or ""
+
+        added = 0
+        for g in grades:
+            w_raw = request.form.get(f"weight_{g['id']}") or ""
+            p_raw = request.form.get(f"price_{g['id']}") or ""
+            try:
+                w = float(w_raw.replace(",", ".")) if w_raw.strip() else 0
+            except ValueError:
+                w = 0
+            try:
+                p = float(p_raw.replace(",", ".")) if p_raw.strip() else 0
+            except ValueError:
+                p = 0
+
+            if w > 0 and p >= 0:
+                models.add_acceptance(form_date, season_id, g["id"], w, p, supplier_id, notes)
+                added += 1
+
+        if added:
+            flash(f"Сохранено записей: {added}", "ok")
+        else:
+            flash("Не введено ни одного значения веса", "err")
+        return redirect(url_for("acceptance"))
+
+    # GET
+    selected_date = request.args.get("date") or today
+    rows = models.list_acceptance_for_date(selected_date, season_id)
+    latest_prices = models.latest_prices_dict(selected_date)
+    raw_stock = models.get_raw_stock(season_id)
+
+    return render_template(
+        "acceptance.html",
+        grades=grades,
+        suppliers=suppliers,
+        today=today,
+        selected_date=selected_date,
+        rows=rows,
+        latest_prices=latest_prices,
+        raw_stock=raw_stock,
+    )
+
+
+@app.route("/acceptance/<int:record_id>/delete", methods=["POST"])
+@login_required
+def acceptance_delete(record_id):
+    models.delete_acceptance(record_id)
+    flash("Запись удалена", "ok")
+    return redirect(request.referrer or url_for("acceptance"))
+
+
+# --- Справочники --------------------------------------------------------------
+
+@app.route("/directories", methods=["GET"])
+@login_required
+def directories():
+    grades = models.list_grades()
+    prices = models.list_purchase_prices()
+    suppliers = models.list_suppliers()
+    return render_template(
+        "directories.html",
+        grades=grades,
+        prices=prices,
+        suppliers=suppliers,
+        today=date.today().isoformat(),
+    )
+
+
+@app.route("/directories/purchase-prices", methods=["POST"])
+@login_required
+def directories_add_price():
+    try:
+        grade_id = int(request.form.get("grade_id") or 0)
+        price = float((request.form.get("price_per_kg") or "0").replace(",", "."))
+        eff = request.form.get("effective_from") or date.today().isoformat()
+    except ValueError:
+        flash("Некорректные значения", "err")
+        return redirect(url_for("directories"))
+    if price < 0 or grade_id <= 0:
+        flash("Цена и сорт должны быть заданы", "err")
+        return redirect(url_for("directories"))
+    models.add_purchase_price(grade_id, price, eff)
+    flash("Цена добавлена", "ok")
+    return redirect(url_for("directories") + "#prices")
+
+
+@app.route("/directories/purchase-prices/<int:price_id>/delete", methods=["POST"])
+@login_required
+def directories_delete_price(price_id):
+    models.delete_purchase_price(price_id)
+    flash("Запись цены удалена", "ok")
+    return redirect(url_for("directories") + "#prices")
+
+
+@app.route("/directories/suppliers", methods=["POST"])
+@login_required
+def directories_add_supplier():
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not name:
+        flash("Имя поставщика обязательно", "err")
+        return redirect(url_for("directories") + "#suppliers")
+    models.add_supplier(name, phone, notes)
+    flash(f"Поставщик «{name}» добавлен", "ok")
+    return redirect(url_for("directories") + "#suppliers")
+
+
+@app.route("/directories/suppliers/<int:supplier_id>/edit", methods=["POST"])
+@login_required
+def directories_edit_supplier(supplier_id):
+    name = (request.form.get("name") or "").strip()
+    phone = (request.form.get("phone") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not name:
+        flash("Имя поставщика обязательно", "err")
+        return redirect(url_for("directories") + "#suppliers")
+    models.update_supplier(supplier_id, name, phone, notes)
+    flash("Поставщик обновлён", "ok")
+    return redirect(url_for("directories") + "#suppliers")
+
+
+@app.route("/directories/suppliers/<int:supplier_id>/delete", methods=["POST"])
+@login_required
+def directories_delete_supplier(supplier_id):
+    affected = models.delete_supplier(supplier_id)
+    if affected:
+        flash(f"Поставщик удалён. У {affected} записей приёмки поставщик снят.", "ok")
+    else:
+        flash("Поставщик удалён", "ok")
+    return redirect(url_for("directories") + "#suppliers")
+
+
+# --- Заглушки остальных разделов ----------------------------------------------
 
 PLACEHOLDERS = {
-    "acceptance": ("Приёмка", 2),
     "drying": ("Сушка", 3),
     "waste": ("Мусор и отходы", 3),
     "sales": ("Продажа", 4),
     "expenses": ("Расходы", 4),
-    "directories": ("Справочники", 2),
     "seasons": ("Сезоны", 5),
     "reports": ("Отчёты", 6),
 }
-
-
-@app.route("/acceptance")
-@login_required
-def acceptance():
-    return render_template("placeholder.html", title=PLACEHOLDERS["acceptance"][0],
-                           stage=PLACEHOLDERS["acceptance"][1])
 
 
 @app.route("/drying")
@@ -222,13 +386,6 @@ def sales():
 def expenses():
     return render_template("placeholder.html", title=PLACEHOLDERS["expenses"][0],
                            stage=PLACEHOLDERS["expenses"][1])
-
-
-@app.route("/directories")
-@login_required
-def directories():
-    return render_template("placeholder.html", title=PLACEHOLDERS["directories"][0],
-                           stage=PLACEHOLDERS["directories"][1])
 
 
 @app.route("/seasons")

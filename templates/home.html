@@ -11,20 +11,41 @@
         {% endif %}
     </div>
 
-    <div class="bg-white rounded-2xl border border-gray-200 p-5">
-        <h2 class="font-medium text-gray-900 mb-2">Остатки</h2>
-        <p class="text-sm text-gray-500">Здесь появятся остатки сырья и готовой продукции. Будет в Этапе 6.</p>
-        <div class="grid grid-cols-2 gap-3 mt-4">
-            <div class="bg-gray-50 rounded-lg p-3">
-                <p class="text-xs text-gray-500">Сырьё на складе</p>
-                <p class="text-lg font-semibold text-gray-400">—</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="bg-white rounded-2xl border border-gray-200 p-4">
+            <h2 class="font-medium text-gray-900 mb-2">Сырьё на складе</h2>
+            <ul class="divide-y divide-gray-100">
+                {% for g in grades %}
+                <li class="flex justify-between py-1.5 text-sm">
+                    <span class="text-gray-600">{{ g.display_name }}</span>
+                    <span class="font-semibold text-emerald-700">{{ raw_stock[g.id]|kg }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 p-4">
+            <h2 class="font-medium text-gray-900 mb-2">Сухой гриб на складе</h2>
+            <p class="text-sm text-gray-400 py-4 text-center">— появится в Этапе 3 —</p>
+        </div>
+    </div>
+
+    {% if accepted_today_kg or season_totals.total_kg %}
+    <div class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-2">Сегодня</h2>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+            <div>
+                <p class="text-xs text-gray-500">Принято</p>
+                <p class="text-lg font-semibold">{{ accepted_today_kg|kg }}</p>
+                <p class="text-xs text-gray-500">{{ accepted_today_amount|money }}</p>
             </div>
-            <div class="bg-gray-50 rounded-lg p-3">
-                <p class="text-xs text-gray-500">Сухой гриб</p>
-                <p class="text-lg font-semibold text-gray-400">—</p>
+            <div>
+                <p class="text-xs text-gray-500">Всего за сезон</p>
+                <p class="text-lg font-semibold">{{ season_totals.total_kg|kg }}</p>
+                <p class="text-xs text-gray-500">{{ season_totals.total_amount|money }}</p>
             </div>
         </div>
     </div>
+    {% endif %}
 
     <div>
         <h2 class="font-medium text-gray-900 mb-2 px-1">Действия</h2>
@@ -69,7 +90,7 @@
     </div>
 
     <div class="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
-        <p><strong class="text-gray-700">Этап 1 готов.</strong> Каркас приложения работает. Дальше — Этап 2: справочники и приёмка.</p>
+        <p><strong class="text-gray-700">Этап 2 активен.</strong> Справочники и приёмка работают. Сушка и отчёты — в следующих этапах.</p>
     </div>
 </div>
 {% endblock %}
