@@ -155,21 +155,31 @@ def home():
     season_id = season["id"]
     grades = models.list_grades()
     raw_stock = models.get_raw_stock(season_id)
+    dry_stock = models.get_dry_stock(season_id)
     season_totals = models.get_raw_stock_total_season(season_id)
+    season_yield = models.get_drying_yield_season(season_id)
 
     # Итоги за сегодня
     today = date.today().isoformat()
     today_rows = models.list_acceptance_for_date(today, season_id)
     accepted_today_kg = sum(r["weight_kg"] for r in today_rows)
     accepted_today_amount = sum(r["total_amount"] for r in today_rows)
+    today_drying = models.get_drying_kg_by_date(today, season_id)
+    waste_today = models.get_waste_kg_by_date(today, season_id)
+    waste_pct_today = (waste_today / accepted_today_kg * 100) if accepted_today_kg > 0 else 0.0
 
     return render_template(
         "home.html",
         grades=grades,
         raw_stock=raw_stock,
+        dry_stock=dry_stock,
         season_totals=season_totals,
+        season_yield=season_yield,
         accepted_today_kg=accepted_today_kg,
         accepted_today_amount=accepted_today_amount,
+        today_drying=today_drying,
+        waste_today=waste_today,
+        waste_pct_today=waste_pct_today,
         today=today,
     )
 
@@ -348,30 +358,154 @@ def directories_delete_supplier(supplier_id):
     return redirect(url_for("directories") + "#suppliers")
 
 
+# --- Сушка --------------------------------------------------------------------
+
+def _parse_kg(value: str) -> float:
+    if not value:
+        return 0.0
+    try:
+        return float(str(value).replace(",", "."))
+    except ValueError:
+        return 0.0
+
+
+@app.route("/drying", methods=["GET", "POST"])
+@login_required
+def drying():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    grades = models.list_grades()
+    today = date.today().isoformat()
+    raw_stock = models.get_raw_stock(season_id)
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or today
+        raw_by_grade = {g["id"]: _parse_kg(request.form.get(f"raw_{g['id']}")) for g in grades}
+        dry_by_grade = {g["id"]: _parse_kg(request.form.get(f"dry_{g['id']}")) for g in grades}
+        cost_el = _parse_kg(request.form.get("cost_electricity"))
+        cost_wt = _parse_kg(request.form.get("cost_water"))
+        cost_fw = _parse_kg(request.form.get("cost_firewood"))
+        cost_lb = _parse_kg(request.form.get("cost_labor"))
+        notes = request.form.get("notes") or ""
+
+        # Валидация: должен быть хотя бы один заполненный сорт
+        total_raw = sum(raw_by_grade.values())
+        total_dry = sum(dry_by_grade.values())
+        if total_raw <= 0 and total_dry <= 0:
+            flash("Не введено ни одного значения", "err")
+            return redirect(url_for("drying"))
+
+        # Валидация: нельзя загрузить больше сырья, чем есть на остатке
+        over = []
+        for g in grades:
+            if raw_by_grade[g["id"]] > raw_stock[g["id"]] + 0.001:
+                over.append(f"{g['display_name']}: {raw_by_grade[g['id']]:.2f} > остаток {raw_stock[g['id']]:.2f}")
+        if over:
+            flash("Недостаточно сырья: " + "; ".join(over), "err")
+            return redirect(url_for("drying"))
+
+        # Валидация: сухого не может быть больше сырья
+        for g in grades:
+            r = raw_by_grade[g["id"]]
+            d = dry_by_grade[g["id"]]
+            if d > r + 0.001:
+                flash(f"{g['display_name']}: получено {d:.2f} кг > загружено {r:.2f} кг", "err")
+                return redirect(url_for("drying"))
+
+        models.add_drying_run(
+            form_date, season_id,
+            raw_by_grade, dry_by_grade,
+            cost_el, cost_wt, cost_fw, cost_lb, notes,
+        )
+        flash("Запись сушки сохранена", "ok")
+        return redirect(url_for("drying"))
+
+    # GET
+    selected_date = request.args.get("date") or today
+    runs = models.list_drying_runs_for_date(selected_date, season_id)
+    season_yield = models.get_drying_yield_season(season_id)
+    return render_template(
+        "drying.html",
+        grades=grades,
+        today=today,
+        selected_date=selected_date,
+        raw_stock=raw_stock,
+        runs=runs,
+        season_yield=season_yield,
+    )
+
+
+@app.route("/drying/<int:run_id>/delete", methods=["POST"])
+@login_required
+def drying_delete(run_id):
+    models.delete_drying_run(run_id)
+    flash("Запись сушки удалена", "ok")
+    return redirect(request.referrer or url_for("drying"))
+
+
+# --- Мусор --------------------------------------------------------------------
+
+@app.route("/waste", methods=["GET", "POST"])
+@login_required
+def waste():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    today = date.today().isoformat()
+
+    if request.method == "POST":
+        form_date = request.form.get("date") or today
+        w = _parse_kg(request.form.get("weight_kg"))
+        if w <= 0:
+            flash("Введите вес больше 0", "err")
+            return redirect(url_for("waste"))
+        models.add_waste_record(form_date, season_id, w)
+        flash(f"Записан мусор: {w:.2f} кг", "ok")
+        return redirect(url_for("waste"))
+
+    # GET
+    selected_date = request.args.get("date") or today
+    rows = models.list_waste_records_for_date(selected_date, season_id)
+    accepted_today = models.get_accepted_kg_by_date(selected_date, season_id)
+    waste_today = models.get_waste_kg_by_date(selected_date, season_id)
+    waste_pct = (waste_today / accepted_today * 100) if accepted_today > 0 else 0.0
+    waste_total_season = models.get_waste_total_season(season_id)
+    accepted_total_season = models.get_raw_stock_total_season(season_id)["total_kg"]
+    waste_pct_season = (waste_total_season / accepted_total_season * 100) if accepted_total_season > 0 else 0.0
+
+    return render_template(
+        "waste.html",
+        today=today,
+        selected_date=selected_date,
+        rows=rows,
+        accepted_today=accepted_today,
+        waste_today=waste_today,
+        waste_pct=waste_pct,
+        waste_total_season=waste_total_season,
+        accepted_total_season=accepted_total_season,
+        waste_pct_season=waste_pct_season,
+    )
+
+
+@app.route("/waste/<int:record_id>/delete", methods=["POST"])
+@login_required
+def waste_delete(record_id):
+    models.delete_waste_record(record_id)
+    flash("Запись удалена", "ok")
+    return redirect(request.referrer or url_for("waste"))
+
+
 # --- Заглушки остальных разделов ----------------------------------------------
 
 PLACEHOLDERS = {
-    "drying": ("Сушка", 3),
-    "waste": ("Мусор и отходы", 3),
     "sales": ("Продажа", 4),
     "expenses": ("Расходы", 4),
     "seasons": ("Сезоны", 5),
     "reports": ("Отчёты", 6),
 }
-
-
-@app.route("/drying")
-@login_required
-def drying():
-    return render_template("placeholder.html", title=PLACEHOLDERS["drying"][0],
-                           stage=PLACEHOLDERS["drying"][1])
-
-
-@app.route("/waste")
-@login_required
-def waste():
-    return render_template("placeholder.html", title=PLACEHOLDERS["waste"][0],
-                           stage=PLACEHOLDERS["waste"][1])
 
 
 @app.route("/sales")
