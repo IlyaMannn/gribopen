@@ -13,6 +13,27 @@
         {% endif %}
     </div>
 
+    {% if not (raw_stock[1] or raw_stock[2] or raw_stock[3] or season_sales.total_kg or season_expenses.total) %}
+    <div class="bg-white rounded-2xl border border-emerald-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-1">С чего начать</h2>
+        <p class="text-sm text-gray-600 mb-3">Сделайте три шага, чтобы начать вести учёт:</p>
+        <ol class="space-y-2 text-sm">
+            <li class="flex items-start gap-2">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">1</span>
+                <span><a href="{{ url_for('directories') }}" class="text-emerald-700 underline">Задайте закупочные цены</a> — они подставятся в форму приёмки автоматически.</span>
+            </li>
+            <li class="flex items-start gap-2">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">2</span>
+                <span><a href="{{ url_for('acceptance') }}" class="text-emerald-700 underline">Запишите первую приёмку</a> — заполните три строки по сортам.</span>
+            </li>
+            <li class="flex items-start gap-2">
+                <span class="shrink-0 w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-semibold">3</span>
+                <span><a href="{{ url_for('drying') }}" class="text-emerald-700 underline">После сушки</a> внесите результаты, а в <a href="{{ url_for('sales') }}" class="text-emerald-700 underline">продажах</a> — реализацию.</span>
+            </li>
+        </ol>
+    </div>
+    {% endif %}
+
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div class="bg-white rounded-2xl border border-gray-200 p-4">
             <h2 class="font-medium text-gray-900 mb-2">Сырьё на складе</h2>
@@ -172,7 +193,7 @@
     </div>
 
     <div class="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
-        <p><strong class="text-gray-700">Этап 6 активен.</strong> Отчёты работают: сводка P&L, по поставщикам, по покупателям, по дням — с фильтром по периоду (сезон/сегодня/неделя/месяц/произвольный). Полировка — в следующем этапе.</p>
+        <p><strong class="text-gray-700">Готово.</strong> Все 7 этапов завершены: приёмка → сушка → мусор → продажи → расходы → сезоны → отчёты. Подсказка: для печати отчёта нажмите Ctrl+P.</p>
     </div>
 </div>
 {% endblock %}

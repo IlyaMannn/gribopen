@@ -1,8 +1,10 @@
 """Flask-приложение: маршруты, маршрутизация, запуск."""
 from datetime import date, datetime, timedelta
+import csv
+import io
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, abort,
+    session, flash, abort, Response,
 )
 from db import init_db, get_db, close_db
 from auth import (
@@ -756,6 +758,97 @@ def reports():
     )
 
 
+@app.route("/reports/export.csv")
+@login_required
+def reports_export_csv():
+    """Экспорт отчёта в CSV. Параметр ?section=suppliers|buyers|daily|pnl."""
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    preset = request.args.get("preset", "season")
+    date_from = request.args.get("date_from", "").strip() or None
+    date_to = request.args.get("date_to", "").strip() or None
+    if not date_from and not date_to:
+        if preset == "today":
+            d = date.today()
+            date_from = date_to = d.isoformat()
+        elif preset == "yesterday":
+            d = date.today() - timedelta(days=1)
+            date_from = date_to = d.isoformat()
+        elif preset == "week":
+            date_from = (date.today() - timedelta(days=6)).isoformat()
+            date_to = date.today().isoformat()
+        elif preset == "month":
+            date_from = date.today().replace(day=1).isoformat()
+            date_to = date.today().isoformat()
+        elif preset == "season":
+            date_from = season["start_date"]
+            date_to = season["end_date"] or date.today().isoformat()
+
+    section = request.args.get("section", "daily")
+    buf = io.StringIO()
+    # BOM для корректного открытия в Excel на Windows
+    buf.write("\ufeff")
+    writer = csv.writer(buf, delimiter=";")
+
+    if section == "pnl":
+        pnl = models.pnl_by_period(season_id, date_from, date_to)
+        writer.writerow(["Показатель", "Значение"])
+        writer.writerow(["Период", f"{date_from or 'с начала'} — {date_to or 'сейчас'}"])
+        writer.writerow(["Принято, кг", f"{pnl['accepted_kg']:.2f}"])
+        writer.writerow(["Принято, ₽", f"{pnl['accepted_amount']:.2f}"])
+        writer.writerow(["Загружено в сушку, кг", f"{pnl['dried_raw_kg']:.2f}"])
+        writer.writerow(["Получено сухого, кг", f"{pnl['dried_dry_kg']:.2f}"])
+        writer.writerow(["Расходы на сушку, ₽", f"{pnl['drying_cost']:.2f}"])
+        writer.writerow(["Мусор, кг", f"{pnl['waste_kg']:.2f}"])
+        writer.writerow(["Продано, кг", f"{pnl['sales_kg']:.2f}"])
+        writer.writerow(["Выручка, ₽", f"{pnl['revenue']:.2f}"])
+        writer.writerow(["Общие расходы, ₽", f"{pnl['expenses_total']:.2f}"])
+        writer.writerow(["Всего расходов, ₽", f"{pnl['total_cost']:.2f}"])
+        writer.writerow(["Прибыль, ₽", f"{pnl['profit']:.2f}"])
+        fname = "pnl.csv"
+    elif section == "suppliers":
+        suppliers = models.supplier_summary(season_id, date_from, date_to)
+        writer.writerow(["Поставщик", "Записей", "Кг", "Сумма, ₽"])
+        for s in suppliers:
+            writer.writerow([s["supplier_name"] or "(без имени)", s["deliveries"],
+                             f"{s['kg']:.2f}", f"{s['amount']:.2f}"])
+        fname = "suppliers.csv"
+    elif section == "buyers":
+        buyers = models.buyer_summary(season_id, date_from, date_to)
+        writer.writerow(["Покупатель", "Сделок", "Кг", "Выручка, ₽"])
+        for b in buyers:
+            writer.writerow([b["buyer_name"] or "(без имени)", b["deals"],
+                             f"{b['kg']:.2f}", f"{b['amount']:.2f}"])
+        fname = "buyers.csv"
+    else:  # daily
+        daily = models.daily_summary(season_id, date_from, date_to)
+        writer.writerow(["Дата", "Принято кг", "Принято ₽", "В сушку кг", "Получено сух кг",
+                         "Расходы сушка ₽", "Мусор кг", "Продано кг", "Выручка ₽",
+                         "Общие расходы ₽", "Прибыль ₽"])
+        for d in daily:
+            writer.writerow([d["date"],
+                             f"{d['accepted_kg']:.2f}", f"{d['accepted_amount']:.2f}",
+                             f"{d['dried_raw_kg']:.2f}", f"{d['dried_dry_kg']:.2f}",
+                             f"{d['drying_cost']:.2f}", f"{d['waste_kg']:.2f}",
+                             f"{d['sales_kg']:.2f}", f"{d['revenue']:.2f}",
+                             f"{d['expenses_total']:.2f}", f"{d['profit']:.2f}"])
+        fname = "daily.csv"
+
+    data = buf.getvalue()
+    season_name = season["name"].replace(" ", "_")
+    stamp = date.today().isoformat()
+    return Response(
+        data,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fname}"',
+            "Content-Language": "ru",
+        },
+    )
+
+
 # --- Запуск -------------------------------------------------------------------
 
 def main():
@@ -770,6 +863,18 @@ def main():
     print("=" * 60)
     # debug=False чтобы не было reload-проблем; use_reloader=False
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+
+
+# --- Кастомные ошибки ---------------------------------------------------------
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("404.html"), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template("500.html"), 500
 
 
 if __name__ == "__main__":

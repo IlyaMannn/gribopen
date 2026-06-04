@@ -69,3 +69,16 @@ input[type="date"], input[type="email"], select, textarea {
         font-size: 16px;
     }
 }
+
+/* Печатные стили — для отчётов */
+@media print {
+    header, nav, .no-print { display: none !important; }
+    main { padding: 0 !important; max-width: 100% !important; }
+    body { background: white !important; }
+    .bg-white { box-shadow: none !important; border-color: #d1d5db !important; }
+    .rounded-2xl { border-radius: 4px !important; }
+    a[href]::after { content: "" !important; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; }
+    h2 { page-break-after: avoid; }
+}

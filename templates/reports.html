@@ -3,7 +3,14 @@
 
 {% block content %}
 <div class="max-w-3xl mx-auto space-y-4">
-    <h1 class="text-xl font-semibold text-gray-900 px-1">Отчёты</h1>
+    <div class="flex items-center justify-between px-1">
+        <h1 class="text-xl font-semibold text-gray-900">Отчёты</h1>
+        <button type="button" onclick="window.print()"
+                class="no-print text-sm px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Печать
+        </button>
+    </div>
 
     <!-- Пресеты -->
     <div class="bg-white rounded-2xl border border-gray-200 p-3">
@@ -59,6 +66,21 @@
             {% endif %}
             · сезон «{{ season.name }}»
         </p>
+
+        <div class="flex flex-wrap gap-1.5 pt-2 mt-2 border-t border-gray-100">
+            <span class="text-xs text-gray-500 self-center mr-1">Скачать CSV:</span>
+            {% set qs = "?preset=" ~ preset %}
+            {% if date_from %}{% set qs = qs ~ "&date_from=" ~ date_from %}{% endif %}
+            {% if date_to %}{% set qs = qs ~ "&date_to=" ~ date_to %}{% endif %}
+            <a href="{{ url_for('reports_export_csv', section='daily', preset=preset, date_from=date_from, date_to=date_to) }}"
+               class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700">По дням</a>
+            <a href="{{ url_for('reports_export_csv', section='suppliers', preset=preset, date_from=date_from, date_to=date_to) }}"
+               class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700">Поставщики</a>
+            <a href="{{ url_for('reports_export_csv', section='buyers', preset=preset, date_from=date_from, date_to=date_to) }}"
+               class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700">Покупатели</a>
+            <a href="{{ url_for('reports_export_csv', section='pnl', preset=preset, date_from=date_from, date_to=date_to) }}"
+               class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-700">P&amp;L</a>
+        </div>
     </div>
 
     <!-- 1. Сводка P&L -->
