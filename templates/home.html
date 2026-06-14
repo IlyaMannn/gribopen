@@ -13,7 +13,7 @@
         {% endif %}
     </div>
 
-    {% if not (raw_stock[1] or raw_stock[2] or raw_stock[3] or season_sales.total_kg or season_expenses.total) %}
+    {% if not (raw_stock[1] or raw_stock[2] or raw_stock[3] or today_sales.total_kg or today_expenses) %}
     <div class="bg-white rounded-2xl border border-emerald-200 p-4">
         <h2 class="font-medium text-gray-900 mb-1">С чего начать</h2>
         <p class="text-sm text-gray-600 mb-3">Сделайте три шага, чтобы начать вести учёт:</p>
@@ -71,6 +71,20 @@
         </div>
     </div>
 
+    {% if notifications %}
+    <div class="space-y-2">
+        {% for n in notifications %}
+        <div class="px-4 py-3 rounded-lg text-sm border
+            {% if n.type == 'danger' %}bg-red-50 text-red-800 border-red-200
+            {% elif n.type == 'warning' %}bg-amber-50 text-amber-800 border-amber-200
+            {% elif n.type == 'success' %}bg-emerald-50 text-emerald-800 border-emerald-200
+            {% else %}bg-blue-50 text-blue-800 border-blue-200{% endif %}">
+            {{ n.text }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     {% if accepted_today_kg or today_drying.raw or waste_today or today_sales.total_kg or today_expenses %}
     <div class="bg-white rounded-2xl border border-gray-200 p-4">
         <h2 class="font-medium text-gray-900 mb-3">Сегодня</h2>
@@ -105,104 +119,6 @@
                 <p class="text-lg font-semibold text-red-600">{{ today_expenses|money }}</p>
             </div>
         </div>
-    </div>
-    {% endif %}
-
-    {% if season_yield.total_raw > 0 %}
-    <div class="bg-white rounded-2xl border border-gray-200 p-4">
-        <h2 class="font-medium text-gray-900 mb-2">Сезон: сушка</h2>
-        <div class="grid grid-cols-3 gap-3 text-center">
-            <div>
-                <p class="text-xs text-gray-500">Загружено</p>
-                <p class="text-lg font-semibold text-gray-700">{{ season_yield.total_raw|kg }}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Получено</p>
-                <p class="text-lg font-semibold text-gray-700">{{ season_yield.total_dry|kg }}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Выход</p>
-                <p class="text-lg font-semibold text-emerald-700">{{ season_yield.yield_pct|round(1) }}%</p>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    {% if season_sales.total_kg > 0 or season_expenses.total > 0 %}
-    <div class="bg-white rounded-2xl border border-gray-200 p-4">
-        <h2 class="font-medium text-gray-900 mb-2">Сезон: финансы</h2>
-        <div class="grid grid-cols-3 gap-3 text-center">
-            <div>
-                <p class="text-xs text-gray-500">Продано</p>
-                <p class="text-lg font-semibold text-gray-700">{{ season_sales.total_kg|kg }}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Выручка</p>
-                <p class="text-lg font-semibold text-emerald-700">{{ season_sales.total_amount|money }}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Расходы</p>
-                <p class="text-lg font-semibold text-red-600">{{ season_expenses.total|money }}</p>
-            </div>
-        </div>
-        {% if season_sales.total_kg > 0 %}
-        <div class="mt-3 pt-3 border-t border-gray-100 text-center">
-            <p class="text-xs text-gray-500">Прибыль (выручка − расходы)</p>
-            <p class="text-xl font-semibold {% if (season_sales.total_amount - season_expenses.total) >= 0 %}text-emerald-700{% else %}text-red-600{% endif %}">
-                {{ (season_sales.total_amount - season_expenses.total)|money }}
-            </p>
-        </div>
-        {% endif %}
-    </div>
-    {% endif %}
-
-    {% if cost.cost_per_kg > 0 or cost.total_invested > 0 %}
-    <div class="bg-white rounded-2xl border border-gray-200 p-4">
-        <h2 class="font-medium text-gray-900 mb-2">Производство</h2>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
-            <div>
-                <p class="text-xs text-gray-500">Всего вложено</p>
-                <p class="text-lg font-semibold text-gray-700">{{ cost.total_invested|money }}</p>
-                <p class="text-xs text-gray-400">приёмка+сушка+общие</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Себестоимость 1 кг</p>
-                {% if cost.cost_per_kg > 0 %}
-                <p class="text-lg font-semibold text-amber-700">{{ cost.cost_per_kg|money }}</p>
-                <p class="text-xs text-gray-400">за 1 кг сухого</p>
-                {% else %}
-                <p class="text-lg font-semibold text-gray-400">— ₽</p>
-                <p class="text-xs text-gray-400">нет сухого</p>
-                {% endif %}
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Продано</p>
-                <p class="text-lg font-semibold text-emerald-700">{{ cost.sold_kg|kg }}</p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Сухой остаток</p>
-                <p class="text-lg font-semibold text-gray-700">{{ cost.dry_stock_kg|kg }}</p>
-            </div>
-        </div>
-        {% if margin.revenue > 0 %}
-        <div class="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-3 text-center">
-            <div>
-                <p class="text-xs text-gray-500">Прибыль</p>
-                <p class="text-lg font-semibold {% if margin.profit >= 0 %}text-emerald-700{% else %}text-red-600{% endif %}">
-                    {{ margin.profit|money }}
-                </p>
-            </div>
-            <div>
-                <p class="text-xs text-gray-500">Рентабельность</p>
-                <p class="text-lg font-semibold {% if margin.margin_pct >= 30 %}text-emerald-700{% elif margin.margin_pct >= 10 %}text-amber-600{% else %}text-red-600{% endif %}">
-                    {{ margin.margin_pct|round(1) }}%
-                </p>
-            </div>
-        </div>
-        {% endif %}
-        <p class="text-xs text-gray-400 text-center mt-2">
-            <a href="{{ url_for('reports') }}" class="hover:underline">Подробнее в отчётах →</a>
-        </p>
     </div>
     {% endif %}
 
@@ -252,10 +168,6 @@
                 <span>Отчёты</span>
             </a>
         </div>
-    </div>
-
-    <div class="bg-white rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
-        <p><strong class="text-gray-700">Готово.</strong> Все 7 этапов завершены: приёмка → сушка → мусор → продажи → расходы → сезоны → отчёты. Подсказка: для печати отчёта нажмите Ctrl+P.</p>
     </div>
 </div>
 {% endblock %}

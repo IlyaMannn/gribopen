@@ -37,24 +37,24 @@
                             <option value="{{ s.id }}" {% if request.args.get('new_supplier')|int == s.id %}selected{% endif %}>{{ s.name }}{% if s.phone %} · {{ s.phone }}{% endif %}</option>
                         {% endfor %}
                     </select>
-                    <details class="relative shrink-0">
-                        <summary class="list-none cursor-pointer h-[42px] w-[42px] flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700" title="Добавить поставщика">
+                    <div id="qs-wrap" class="relative shrink-0">
+                        <button type="button" id="qs-toggle"
+                                class="h-[42px] w-[42px] flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700" title="Добавить поставщика">
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                        </summary>
-                        <form method="post" action="{{ url_for('acceptance_quick_supplier') }}"
-                              class="absolute right-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72 space-y-2">
+                        </button>
+                        <div id="qs-form" class="hidden absolute right-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72 space-y-2">
                             <input type="hidden" name="date" value="{{ selected_date }}">
-                            <input type="text" name="name" required maxlength="100" placeholder="Имя / название"
+                            <input type="text" id="qs-name" required maxlength="100" placeholder="Имя / название"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
-                            <input type="text" name="phone" maxlength="50" placeholder="Телефон (необязательно)"
+                            <input type="text" id="qs-phone" maxlength="50" placeholder="Телефон (необязательно)"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
-                            <input type="text" name="notes" maxlength="200" placeholder="Заметка (необязательно)"
+                            <input type="text" id="qs-supplier-notes" maxlength="200" placeholder="Заметка (необязательно)"
                                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
-                            <button type="submit" class="w-full bg-emerald-600 text-white py-1.5 text-sm rounded font-medium hover:bg-emerald-700">
+                            <button type="button" id="qs-save" class="w-full bg-emerald-600 text-white py-1.5 text-sm rounded font-medium hover:bg-emerald-700">
                                 Сохранить
                             </button>
-                        </form>
-                    </details>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -71,6 +71,7 @@
             <div class="js-row border-t border-gray-200 first:border-t-0 md:grid md:grid-cols-12 md:gap-2 md:items-center px-3 py-3 md:py-2 space-y-2 md:space-y-0">
                 <div class="md:col-span-3 text-sm font-medium text-gray-700">{{ g.display_name }}</div>
                 <div class="md:col-span-3">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">Вес, кг</label>
                     <input type="number" step="0.01" min="0" inputmode="decimal"
                            name="weight_{{ g.id }}"
                            placeholder="0"
@@ -78,6 +79,7 @@
                            oninput="calcRow(this.closest('.js-row'))">
                 </div>
                 <div class="md:col-span-3">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">Цена, ₽/кг</label>
                     <input type="number" step="0.01" min="0" inputmode="decimal"
                            name="price_{{ g.id }}"
                            placeholder="0"
@@ -203,5 +205,20 @@ function calcTotal() {
         total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }
 document.querySelectorAll('.js-row').forEach(row => calcRow(row));
+
+document.getElementById('qs-toggle').addEventListener('click', function() {
+    document.getElementById('qs-form').classList.toggle('hidden');
+});
+document.getElementById('qs-save').addEventListener('click', function() {
+    var name = document.getElementById('qs-name').value.trim();
+    if (!name) { document.getElementById('qs-name').focus(); return; }
+    var fd = new FormData();
+    fd.append('date', '{{ selected_date }}');
+    fd.append('name', name);
+    fd.append('phone', document.getElementById('qs-phone').value.trim());
+    fd.append('supplier_notes', document.getElementById('qs-supplier-notes').value.trim());
+    fetch('{{ url_for("acceptance_quick_supplier") }}', {method: 'POST', body: fd})
+        .then(function(r) { if (r.redirected) window.location.href = r.url; else window.location.reload(); });
+});
 </script>
 {% endblock %}

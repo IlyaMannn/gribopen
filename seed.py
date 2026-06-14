@@ -27,6 +27,15 @@ def seed_if_empty():
                 (code, name, order),
             )
 
+    # Настройки по умолчанию
+    defaults = {
+        "fridge_notify_min": "450",
+        "fridge_notify_max": "500",
+        "min_drying_load": "100",
+    }
+    for key, val in defaults.items():
+        db.execute("INSERT OR IGNORE INTO app_setting (key, value) VALUES (?, ?)", (key, val))
+
     db.commit()
 
 
@@ -151,9 +160,9 @@ def get_season_stats(season_id: int) -> dict:
         "FROM drying_run WHERE season_id = ?", (season_id,)
     ).fetchone()
     sales = db.execute(
-        "SELECT COALESCE(SUM(weight_kg), 0) AS kg, "
-        "COALESCE(SUM(total_amount), 0) AS amount "
-        "FROM sale WHERE season_id = ?", (season_id,)
+        "SELECT COALESCE(SUM(sl.weight_kg), 0) AS kg, "
+        "COALESCE(SUM(sl.total_amount), 0) AS amount "
+        "FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?", (season_id,)
     ).fetchone()
     drying_cost = db.execute(
         "SELECT COALESCE(SUM(COALESCE(cost_electricity, 0) + COALESCE(cost_water, 0) + "

@@ -30,11 +30,44 @@
         </form>
     </div>
 
+    <form method="post" class="bg-white rounded-2xl border border-gray-200 p-5 space-y-4">
+        <h2 class="font-medium text-gray-900">Пороги уведомлений</h2>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Мин. объём холодильника, кг</label>
+            <input type="number" step="1" min="0" name="fridge_notify_min"
+                   value="{{ settings.get('fridge_notify_min', '450') }}"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+            <p class="text-xs text-gray-400 mt-0.5">Жёлтое уведомление «Пора загрузить сушилку»</p>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Макс. объём холодильника, кг</label>
+            <input type="number" step="1" min="0" name="fridge_notify_max"
+                   value="{{ settings.get('fridge_notify_max', '500') }}"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+            <p class="text-xs text-gray-400 mt-0.5">Красное уведомление «Холодильник заполнен!»</p>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Минимальная загрузка сушилки, кг</label>
+            <input type="number" step="1" min="0" name="min_drying_load"
+                   value="{{ settings.get('min_drying_load', '100') }}"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+            <p class="text-xs text-gray-400 mt-0.5">Подсказка «Нужно ещё закупить»</p>
+        </div>
+
+        <button type="submit"
+                class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition">
+            Сохранить настройки
+        </button>
+    </form>
+
     <div class="bg-white rounded-2xl border border-gray-200 p-5">
         <h2 class="font-medium text-gray-900 mb-2">Сезон</h2>
         {% if active_season %}
             <p class="text-sm text-gray-600">Активный: <strong>{{ active_season.name }}</strong> (с {{ active_season.start_date|dmy }})</p>
-            <p class="text-xs text-gray-400 mt-1">Управление сезонами — в Этапе 5.</p>
+            <p class="text-xs text-gray-400 mt-1"><a href="{{ url_for('seasons') }}" class="underline">Управление сезонами</a></p>
         {% else %}
             <p class="text-sm text-gray-500">Активного сезона нет.</p>
         {% endif %}

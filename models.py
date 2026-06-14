@@ -3,6 +3,26 @@ from datetime import date
 from db import get_db
 
 
+# --- Настройки ----------------------------------------------------------------
+
+def get_setting(key, default=None):
+    db = get_db()
+    row = db.execute("SELECT value FROM app_setting WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key, value):
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO app_setting (key, value) VALUES (?, ?)", (key, value))
+    db.commit()
+
+
+def get_all_settings():
+    db = get_db()
+    rows = db.execute("SELECT key, value FROM app_setting").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
 # --- РЎРµР·РѕРЅС‹ ------------------------------------------------------------------
 
 def get_active_season_id() -> int | None:
@@ -294,7 +314,7 @@ def get_dry_stock(season_id: int) -> dict[int, float]:
 
     for r in db.execute("""
         SELECT grade_id, COALESCE(SUM(weight_kg), 0) AS kg
-        FROM sale WHERE season_id = ? GROUP BY grade_id
+        FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ? GROUP BY sl.grade_id
     """, (season_id,)):
         out[r["grade_id"]] -= float(r["kg"])
 
@@ -328,18 +348,22 @@ def get_raw_stock_total_season(season_id: int) -> dict:
 
 # --- РЎСѓС€РєР° --------------------------------------------------------------------
 
-def add_drying_run(date_: str, season_id: int, raw_by_grade: dict, dry_by_grade: dict,
-                   cost_electricity: float, cost_water: float,
-                   cost_firewood: float, cost_labor: float, notes: str | None) -> int:
-    """РЎРѕР·РґР°С‚СЊ Р·Р°РїРёСЃСЊ СЃСѓС€РєРё. raw_by_grade/dry_by_grade: {grade_id: РєРі}."""
+def add_drying_run(date_: str, season_id: int, raw_by_grade: dict, dry_by_grade: dict = None,
+                   cost_electricity: float = 0, cost_water: float = 0,
+                   cost_firewood: float = 0, cost_labor: float = 0, notes: str | None = None,
+                   started_at: str | None = None) -> int:
+    """Создать запись сушки. raw_by_grade/dry_by_grade: {grade_id: кг}."""
+    if dry_by_grade is None:
+        dry_by_grade = {}
     db = get_db()
     cur = db.execute("""
         INSERT INTO drying_run (
             date, season_id,
             raw_grade_1_kg, raw_grade_2_kg, raw_grade_3_kg,
             dry_grade_1_kg, dry_grade_2_kg, dry_grade_3_kg,
-            cost_electricity, cost_water, cost_firewood, cost_labor, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            cost_electricity, cost_water, cost_firewood, cost_labor, notes,
+            started_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         date_, season_id,
         float(raw_by_grade.get(1, 0) or 0),
@@ -351,6 +375,7 @@ def add_drying_run(date_: str, season_id: int, raw_by_grade: dict, dry_by_grade:
         float(cost_electricity or 0), float(cost_water or 0),
         float(cost_firewood or 0), float(cost_labor or 0),
         (notes or "").strip() or None,
+        started_at,
     ))
     db.commit()
     return cur.lastrowid
@@ -386,6 +411,56 @@ def delete_drying_run(run_id: int) -> None:
     db.commit()
 
 
+
+def finish_drying(run_id, dry_by_grade):
+    """Завершить сушку: заполнить dry_*_kg и finished_at."""
+    db = get_db()
+    from datetime import datetime
+    d1 = dry_by_grade.get(1, 0.0)
+    d2 = dry_by_grade.get(2, 0.0)
+    d3 = dry_by_grade.get(3, 0.0)
+    db.execute(
+        """UPDATE drying_run
+           SET dry_grade_1_kg = ?, dry_grade_2_kg = ?, dry_grade_3_kg = ?,
+               finished_at = ?
+           WHERE id = ?""",
+        (d1, d2, d3, datetime.now().isoformat(timespec="seconds"), run_id),
+    )
+    db.commit()
+
+
+def add_drying_expense(run_id, cost_electricity, cost_water, cost_firewood, cost_labor, notes=""):
+    """Добавить расходы к записи сушки."""
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO drying_expense
+           (drying_run_id, cost_electricity, cost_water, cost_firewood, cost_labor, notes)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (run_id, cost_electricity, cost_water, cost_firewood, cost_labor, notes),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def get_drying_expenses(run_id):
+    """Получить все расходы для записи сушки."""
+    db = get_db()
+    return [dict(r) for r in db.execute(
+        "SELECT * FROM drying_expense WHERE drying_run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()]
+
+
+def list_drying_runs_all(season_id):
+    """Все записи сушки за сезон (для выбора в расходах)."""
+    db = get_db()
+    return [dict(r) for r in db.execute(
+        """SELECT id, date,
+                  (raw_grade_1_kg + raw_grade_2_kg + raw_grade_3_kg) AS total_raw,
+                  (dry_grade_1_kg + dry_grade_2_kg + dry_grade_3_kg) AS total_dry,
+                  started_at, finished_at
+           FROM drying_run WHERE season_id = ? ORDER BY date DESC, id DESC""",
+        (season_id,),
+    ).fetchall()]
 def get_drying_yield_season(season_id: int) -> dict:
     """РЎСѓРјРјС‹ СЃСѓС€РєРё Р·Р° СЃРµР·РѕРЅ: kg РїРѕ СЃРѕСЂС‚Р°Рј (raw Рё dry), РѕР±С‰РёР№ РІС‹С…РѕРґ %, СЂР°СЃС…РѕРґС‹."""
     db = get_db()
@@ -601,7 +676,7 @@ def list_buyers() -> list[dict]:
     db = get_db()
     return [dict(r) for r in db.execute("""
         SELECT b.*,
-               (SELECT COUNT(*) FROM sale s WHERE s.buyer_id = b.id) AS uses
+               (SELECT COUNT(*) FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.buyer_id = b.id) AS uses
         FROM buyer b
         ORDER BY b.name
     """)]
@@ -645,80 +720,114 @@ def delete_buyer(buyer_id: int) -> int:
     return affected
 
 
-# --- РџСЂРѕРґР°Р¶Рё ------------------------------------------------------------------
+# --- Продажи (header + lines) ------------------------------------------------
 
-def add_sale(date_: str, season_id: int, buyer_id: int | None, grade_id: int,
-             weight_kg: float, price_per_kg: float) -> int:
-    total = round(float(weight_kg) * float(price_per_kg), 2)
+def add_sale(date_, season_id, buyer_id, lines, notes=""):
     db = get_db()
-    cur = db.execute("""
-        INSERT INTO sale
-            (date, season_id, buyer_id, grade_id, weight_kg, price_per_kg, total_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (date_, season_id, buyer_id or None, grade_id,
-          float(weight_kg), float(price_per_kg), total))
+    cur = db.execute(
+        "INSERT INTO sale (date, season_id, buyer_id, notes) VALUES (?, ?, ?, ?)",
+        (date_, season_id, buyer_id, notes),
+    )
+    sale_id = cur.lastrowid
+    for grade_id, weight_kg, price_per_kg in lines:
+        total = round(float(weight_kg) * float(price_per_kg), 2)
+        db.execute(
+            "INSERT INTO sale_line (sale_id, grade_id, weight_kg, price_per_kg, total_amount) VALUES (?, ?, ?, ?, ?)",
+            (sale_id, grade_id, float(weight_kg), float(price_per_kg), total),
+        )
     db.commit()
-    return cur.lastrowid
+    return sale_id
 
 
-def get_sale(sale_id: int) -> dict | None:
+def get_sale(sale_id):
     db = get_db()
-    row = db.execute("""
-        SELECT s.*, g.display_name AS grade_name, b.name AS buyer_name
-        FROM sale s
-        JOIN grade g ON g.id = s.grade_id
-        LEFT JOIN buyer b ON b.id = s.buyer_id
-        WHERE s.id = ?
-    """, (sale_id,)).fetchone()
-    return dict(row) if row else None
+    sale = db.execute(
+        "SELECT s.*, b.name AS buyer_name FROM sale s LEFT JOIN buyer b ON b.id = s.buyer_id WHERE s.id = ?",
+        (sale_id,),
+    ).fetchone()
+    if not sale:
+        return None
+    lines = [dict(r) for r in db.execute(
+        "SELECT sl.*, g.display_name AS grade_name FROM sale_line sl JOIN grade g ON g.id = sl.grade_id WHERE sl.sale_id = ?",
+        (sale_id,),
+    ).fetchall()]
+    total_kg = sum(l["weight_kg"] for l in lines)
+    total_amount = sum(l["total_amount"] for l in lines)
+    return {**dict(sale), "lines": lines, "total_kg": total_kg, "total_amount": total_amount}
 
 
-def list_sales_for_date(date_: str, season_id: int) -> list[dict]:
+def list_sales_for_date(date_, season_id):
     db = get_db()
-    return [dict(r) for r in db.execute("""
-        SELECT s.*, g.display_name AS grade_name, g.sort_order,
-               b.name AS buyer_name
-        FROM sale s
-        JOIN grade g ON g.id = s.grade_id
-        LEFT JOIN buyer b ON b.id = s.buyer_id
-        WHERE s.date = ? AND s.season_id = ?
-        ORDER BY s.id DESC
-    """, (date_, season_id))]
+    sales = [dict(r) for r in db.execute(
+        "SELECT s.*, b.name AS buyer_name FROM sale s LEFT JOIN buyer b ON b.id = s.buyer_id WHERE s.date = ? AND s.season_id = ? ORDER BY s.id DESC",
+        (date_, season_id),
+    ).fetchall()]
+    for s in sales:
+        s_lines = [dict(r) for r in db.execute(
+            "SELECT sl.*, g.display_name AS grade_name FROM sale_line sl JOIN grade g ON g.id = sl.grade_id WHERE sl.sale_id = ?",
+            (s["id"],),
+        ).fetchall()]
+        s["lines"] = s_lines
+        s["total_kg"] = sum(l["weight_kg"] for l in s_lines)
+        s["total_amount"] = sum(l["total_amount"] for l in s_lines)
+    return sales
 
 
-def list_sales_for_season(season_id: int) -> list[dict]:
+def update_sale(sale_id, date_, season_id, buyer_id, lines, notes=""):
     db = get_db()
-    return [dict(r) for r in db.execute("""
-        SELECT s.*, g.display_name AS grade_name, g.sort_order,
-               b.name AS buyer_name
-        FROM sale s
-        JOIN grade g ON g.id = s.grade_id
-        LEFT JOIN buyer b ON b.id = s.buyer_id
-        WHERE s.season_id = ?
-        ORDER BY s.date DESC, s.id DESC
-    """, (season_id,))]
+    db.execute(
+        "UPDATE sale SET date = ?, season_id = ?, buyer_id = ?, notes = ? WHERE id = ?",
+        (date_, season_id, buyer_id, notes, sale_id),
+    )
+    db.execute("DELETE FROM sale_line WHERE sale_id = ?", (sale_id,))
+    for grade_id, weight_kg, price_per_kg in lines:
+        total = round(float(weight_kg) * float(price_per_kg), 2)
+        db.execute(
+            "INSERT INTO sale_line (sale_id, grade_id, weight_kg, price_per_kg, total_amount) VALUES (?, ?, ?, ?, ?)",
+            (sale_id, grade_id, float(weight_kg), float(price_per_kg), total),
+        )
+    db.commit()
 
 
-def delete_sale(sale_id: int) -> None:
+def delete_sale(sale_id):
     db = get_db()
     db.execute("DELETE FROM sale WHERE id = ?", (sale_id,))
     db.commit()
 
 
-def get_sales_total_season(season_id: int) -> dict:
-    """РџСЂРѕРґР°Р¶Рё Р·Р° СЃРµР·РѕРЅ: РѕР±С‰Р°СЏ РІС‹СЂСѓС‡РєР°, РїРѕ СЃРѕСЂС‚Р°Рј."""
+def list_sales_for_season(season_id):
     db = get_db()
-    row = db.execute("""
-        SELECT
-            COALESCE(SUM(total_amount), 0) AS total,
-            COALESCE(SUM(weight_kg), 0) AS kg
-        FROM sale WHERE season_id = ?
-    """, (season_id,)).fetchone()
+    sales = [dict(r) for r in db.execute(
+        "SELECT s.*, b.name AS buyer_name FROM sale s LEFT JOIN buyer b ON b.id = s.buyer_id WHERE s.season_id = ? ORDER BY s.date DESC, s.id DESC",
+        (season_id,),
+    ).fetchall()]
+    for s in sales:
+        s_lines = [dict(r) for r in db.execute(
+            "SELECT sl.*, g.display_name AS grade_name FROM sale_line sl JOIN grade g ON g.id = sl.grade_id WHERE sl.sale_id = ?",
+            (s["id"],),
+        ).fetchall()]
+        s["lines"] = s_lines
+        s["total_kg"] = sum(l["weight_kg"] for l in s_lines)
+        s["total_amount"] = sum(l["total_amount"] for l in s_lines)
+    return sales
+
+
+def get_sales_total_season(season_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT COALESCE(SUM(sl.total_amount), 0) AS total, "
+        "COALESCE(SUM(sl.weight_kg), 0) AS kg "
+        "FROM sale s JOIN sale_line sl ON sl.sale_id = s.id "
+        "WHERE s.season_id = ?",
+        (season_id,),
+    ).fetchone()
     by_grade = {g["id"]: 0.0 for g in list_grades()}
-    for r in db.execute("""
-        SELECT grade_id, COALESCE(SUM(weight_kg), 0) AS kg
-        FROM sale WHERE season_id = ? GROUP BY grade_id
-    """, (season_id,)):
+    for r in db.execute(
+        "SELECT sl.grade_id, COALESCE(SUM(sl.weight_kg), 0) AS kg "
+        "FROM sale s JOIN sale_line sl ON sl.sale_id = s.id "
+        "WHERE s.season_id = ? GROUP BY sl.grade_id",
+        (season_id,),
+    ):
         by_grade[r["grade_id"]] = float(r["kg"])
     return {
         "total_amount": float(row["total"] or 0),
@@ -727,17 +836,16 @@ def get_sales_total_season(season_id: int) -> dict:
     }
 
 
-def get_sales_kg_by_date(date_: str, season_id: int) -> dict:
-    """РџСЂРѕРґР°РЅРѕ Р·Р° РґРµРЅСЊ: РєРі Рё в‚Ѕ."""
+def get_sales_kg_by_date(date_, season_id):
     db = get_db()
-    row = db.execute("""
-        SELECT
-            COALESCE(SUM(weight_kg), 0) AS kg,
-            COALESCE(SUM(total_amount), 0) AS amount
-        FROM sale WHERE date = ? AND season_id = ?
-    """, (date_, season_id)).fetchone()
+    row = db.execute(
+        "SELECT COALESCE(SUM(sl.weight_kg), 0) AS kg, "
+        "COALESCE(SUM(sl.total_amount), 0) AS amount "
+        "FROM sale s JOIN sale_line sl ON sl.sale_id = s.id "
+        "WHERE s.date = ? AND s.season_id = ?",
+        (date_, season_id),
+    ).fetchone()
     return {"kg": float(row["kg"]), "amount": float(row["amount"])}
-
 
 # --- Р Р°СЃС…РѕРґС‹ (РѕР±С‰РёРµ, РЅРµ СЃСѓС€РєР°) ------------------------------------------------
 
@@ -821,29 +929,32 @@ def _date_filter(table_alias: str, date_from: str | None, date_to: str | None) -
 def pnl_by_period(season_id: int, date_from: str | None = None, date_to: str | None = None) -> dict:
     """P&L за период: выручка минус все расходы."""
     db = get_db()
-    where, params = _date_filter("", date_from, date_to)
-    where = " WHERE season_id = ?" + where
+    where_s, params_s = _date_filter("s", date_from, date_to)
+    where_a, params_a = _date_filter("a", date_from, date_to)
+    where_, params_all = _date_filter("", date_from, date_to)
     acc = db.execute(
         f"SELECT COALESCE(SUM(ag.weight_kg), 0) AS kg, COALESCE(SUM(ag.total_amount), 0) AS amount "
         f"FROM acceptance_grade ag JOIN acceptance a ON a.id = ag.acceptance_id"
-        f"{where.replace('season_id', 'a.season_id')}",
-        (season_id, *params)).fetchone()
+        f" WHERE a.season_id = ?{where_a}",
+        (season_id, *params_a)).fetchone()
     sales = db.execute(
-        f"SELECT COALESCE(SUM(weight_kg), 0) AS kg, COALESCE(SUM(total_amount), 0) AS amount "
-        f"FROM sale{where}", (season_id, *params)).fetchone()
+        f"SELECT COALESCE(SUM(sl.weight_kg), 0) AS kg, COALESCE(SUM(sl.total_amount), 0) AS amount "
+        f"FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?{where_s}",
+        (season_id, *params_s)).fetchone()
     drying = db.execute(
         f"SELECT "
         f"COALESCE(SUM(raw_grade_1_kg + raw_grade_2_kg + raw_grade_3_kg), 0) AS raw, "
         f"COALESCE(SUM(dry_grade_1_kg + dry_grade_2_kg + dry_grade_3_kg), 0) AS dry, "
         f"COALESCE(SUM(COALESCE(cost_electricity, 0) + COALESCE(cost_water, 0) + "
         f"COALESCE(cost_firewood, 0) + COALESCE(cost_labor, 0)), 0) AS cost "
-        f"FROM drying_run{where}", (season_id, *params)).fetchone()
+        f"FROM drying_run WHERE season_id = ?{where_}",
+        (season_id, *params_all)).fetchone()
     waste = db.execute(
-        f"SELECT COALESCE(SUM(grade_1_kg + grade_2_kg + grade_3_kg), 0) AS kg FROM waste_record{where}",
-        (season_id, *params)).fetchone()
+        f"SELECT COALESCE(SUM(grade_1_kg + grade_2_kg + grade_3_kg), 0) AS kg FROM waste_record WHERE season_id = ?{where_}",
+        (season_id, *params_all)).fetchone()
     expenses = db.execute(
-        f"SELECT COALESCE(SUM(amount), 0) AS total FROM expense{where}",
-        (season_id, *params)).fetchone()
+        f"SELECT COALESCE(SUM(amount), 0) AS total FROM expense WHERE season_id = ?{where_}",
+        (season_id, *params_all)).fetchone()
     revenue = float(sales["amount"] or 0)
     total_cost = float(expenses["total"] or 0) + float(drying["cost"] or 0)
     return {
@@ -859,6 +970,7 @@ def pnl_by_period(season_id: int, date_from: str | None = None, date_to: str | N
         "total_cost": total_cost,
         "profit": revenue - total_cost,
     }
+
 
 
 def supplier_summary(season_id: int, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
@@ -886,10 +998,11 @@ def buyer_summary(season_id: int, date_from: str | None = None, date_to: str | N
     where, params = _date_filter("s", date_from, date_to)
     sql = f"""
         SELECT b.id AS buyer_id, b.name AS buyer_name,
-               COALESCE(SUM(s.weight_kg), 0) AS kg,
-               COALESCE(SUM(s.total_amount), 0) AS amount,
-               COUNT(s.id) AS deals
+               COALESCE(SUM(sl.weight_kg), 0) AS kg,
+               COALESCE(SUM(sl.total_amount), 0) AS amount,
+               COUNT(DISTINCT s.id) AS deals
         FROM sale s
+        JOIN sale_line sl ON sl.sale_id = s.id
         LEFT JOIN buyer b ON b.id = s.buyer_id
         WHERE s.season_id = ?{where}
         GROUP BY COALESCE(b.id, 0)
@@ -901,29 +1014,31 @@ def buyer_summary(season_id: int, date_from: str | None = None, date_to: str | N
 def daily_summary(season_id: int, date_from: str | None = None, date_to: str | None = None) -> list[dict]:
     """Сводка по дням. По одной строке на дату с движением, новые сверху."""
     db = get_db()
-    where, params = _date_filter("", date_from, date_to)
-    where = " WHERE season_id = ?" + where
+    where_a, params_a = _date_filter("a", date_from, date_to)
+    where_s, params_s = _date_filter("s", date_from, date_to)
+    where_, params_all = _date_filter("", date_from, date_to)
     acc = {r["date"]: r for r in db.execute(
         f"SELECT a.date AS date, COALESCE(SUM(ag.weight_kg), 0) AS kg, COALESCE(SUM(ag.total_amount), 0) AS amount "
         f"FROM acceptance a JOIN acceptance_grade ag ON ag.acceptance_id = a.id"
-        f"{where.replace('season_id', 'a.season_id')} GROUP BY a.date",
-        (season_id, *params))}
+        f" WHERE a.season_id = ?{where_a} GROUP BY a.date",
+        (season_id, *params_a))}
     dry = {r["date"]: r for r in db.execute(
         f"SELECT date, "
         f"COALESCE(SUM(raw_grade_1_kg + raw_grade_2_kg + raw_grade_3_kg), 0) AS raw, "
         f"COALESCE(SUM(dry_grade_1_kg + dry_grade_2_kg + dry_grade_3_kg), 0) AS dry, "
         f"COALESCE(SUM(COALESCE(cost_electricity, 0) + COALESCE(cost_water, 0) + "
         f"COALESCE(cost_firewood, 0) + COALESCE(cost_labor, 0)), 0) AS cost "
-        f"FROM drying_run{where} GROUP BY date", (season_id, *params))}
+        f"FROM drying_run WHERE season_id = ?{where_} GROUP BY date", (season_id, *params_all))}
     waste = {r["date"]: r["kg"] for r in db.execute(
-        f"SELECT date, COALESCE(SUM(grade_1_kg + grade_2_kg + grade_3_kg), 0) AS kg FROM waste_record{where} "
-        f"GROUP BY date", (season_id, *params))}
+        f"SELECT date, COALESCE(SUM(grade_1_kg + grade_2_kg + grade_3_kg), 0) AS kg FROM waste_record WHERE season_id = ?{where_} "
+        f"GROUP BY date", (season_id, *params_all))}
     sales = {r["date"]: r for r in db.execute(
-        f"SELECT date, COALESCE(SUM(weight_kg), 0) AS kg, COALESCE(SUM(total_amount), 0) AS amount "
-        f"FROM sale{where} GROUP BY date", (season_id, *params))}
+        f"SELECT s.date, COALESCE(SUM(sl.weight_kg), 0) AS kg, COALESCE(SUM(sl.total_amount), 0) AS amount "
+        f"FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?{where_s} GROUP BY s.date",
+        (season_id, *params_s))}
     exp = {r["date"]: r["total"] for r in db.execute(
-        f"SELECT date, COALESCE(SUM(amount), 0) AS total FROM expense{where} "
-        f"GROUP BY date", (season_id, *params))}
+        f"SELECT date, COALESCE(SUM(amount), 0) AS total FROM expense WHERE season_id = ?{where_} "
+        f"GROUP BY date", (season_id, *params_all))}
     all_dates = sorted(set(acc) | set(dry) | set(waste) | set(sales) | set(exp), reverse=True)
     rows = []
     for d in all_dates:
@@ -949,7 +1064,6 @@ def daily_summary(season_id: int, date_from: str | None = None, date_to: str | N
     return rows
 
 
-# --- Новые отчёты (Этап 8) ----------------------------------------------------
 
 def get_cost_per_kg_dry(season_id: int, date_from: str | None = None,
                         date_to: str | None = None) -> dict:
@@ -968,8 +1082,9 @@ def get_cost_per_kg_dry(season_id: int, date_from: str | None = None,
         FROM drying_run WHERE season_id = ? AND date <= ?
     """, (season_id, end_date)).fetchone()[0]
     sold_kg = db.execute("""
-        SELECT COALESCE(SUM(weight_kg), 0) FROM sale
-        WHERE season_id = ? AND date <= ?
+        SELECT COALESCE(SUM(sl.weight_kg), 0) FROM sale s
+        JOIN sale_line sl ON sl.sale_id = s.id
+        WHERE s.season_id = ? AND s.date <= ?
     """, (season_id, end_date)).fetchone()[0]
     dry_stock = float(dry_kg_season or 0) - float(sold_kg or 0)
     if dry_stock < 0:
@@ -993,11 +1108,11 @@ def get_margin(season_id: int, date_from: str | None = None,
                date_to: str | None = None) -> dict:
     """Рентабельность: (выручка - все_расходы) / выручка × 100."""
     db = get_db()
-    where, params = _date_filter("", date_from, date_to)
-    where = " WHERE season_id = ?" + where
+    where_s, params_s = _date_filter("s", date_from, date_to)
     sales = db.execute(
-        f"SELECT COALESCE(SUM(total_amount), 0) AS amount "
-        f"FROM sale{where}", (season_id, *params)).fetchone()
+        f"SELECT COALESCE(SUM(sl.total_amount), 0) AS amount "
+        f"FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?{where_s}",
+        (season_id, *params_s)).fetchone()
     revenue = float(sales["amount"] or 0)
     pnl = pnl_by_period(season_id, date_from, date_to)
     profit = pnl["profit"]
@@ -1008,6 +1123,7 @@ def get_margin(season_id: int, date_from: str | None = None,
         "profit": profit,
         "margin_pct": margin_pct,
     }
+
 
 
 def get_grade_movement(season_id: int, date_from: str | None = None,
@@ -1045,8 +1161,8 @@ def get_grade_movement(season_id: int, date_from: str | None = None,
     # Продано
     sold = {1: 0.0, 2: 0.0, 3: 0.0}
     for r in db.execute(f"""
-        SELECT grade_id, COALESCE(SUM(weight_kg), 0) AS kg FROM sale s
-        WHERE s.season_id = ?{where_s} GROUP BY grade_id
+        SELECT sl.grade_id, COALESCE(SUM(sl.weight_kg), 0) AS kg FROM sale s
+        JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?{where_s} GROUP BY sl.grade_id
     """, (season_id, *params_s)):
         sold[r["grade_id"]] = float(r["kg"] or 0)
 
@@ -1177,11 +1293,12 @@ def get_top_grades(season_id: int, date_from: str | None = None,
     rows = []
     for r in db.execute(f"""
         SELECT g.id AS grade_id, g.display_name AS grade_name,
-               COALESCE(SUM(s.weight_kg), 0) AS kg,
-               COALESCE(SUM(s.total_amount), 0) AS amount,
-               COUNT(s.id) AS deals
+               COALESCE(SUM(sl.weight_kg), 0) AS kg,
+               COALESCE(SUM(sl.total_amount), 0) AS amount,
+               COUNT(DISTINCT s.id) AS deals
         FROM grade g
-        LEFT JOIN sale s ON s.grade_id = g.id AND s.season_id = ?{where}
+        LEFT JOIN sale_line sl ON sl.grade_id = g.id
+        LEFT JOIN sale s ON s.id = sl.sale_id AND s.season_id = ?{where}
         GROUP BY g.id
         ORDER BY amount DESC
     """, (season_id, *params)):
@@ -1199,21 +1316,21 @@ def get_cashflow(season_id: int, date_from: str | None = None,
                  date_to: str | None = None) -> list[dict]:
     """Cash flow по дням: приход (sales), отток (drying_cost + expense), нетто."""
     db = get_db()
-    where, params = _date_filter("", date_from, date_to)
-    where = " WHERE season_id = ?" + where
+    where_s, params_s = _date_filter("s", date_from, date_to)
+    where_, params_all = _date_filter("", date_from, date_to)
 
     sales = {r["date"]: float(r["amount"] or 0) for r in db.execute(
-        f"SELECT date, COALESCE(SUM(total_amount), 0) AS amount FROM sale{where} GROUP BY date",
-        (season_id, *params))}
+        f"SELECT s.date, COALESCE(SUM(sl.total_amount), 0) AS amount FROM sale s JOIN sale_line sl ON sl.sale_id = s.id WHERE s.season_id = ?{where_s} GROUP BY s.date",
+        (season_id, *params_s))}
     exp = {r["date"]: float(r["total"] or 0) for r in db.execute(
-        f"SELECT date, COALESCE(SUM(amount), 0) AS total FROM expense{where} GROUP BY date",
-        (season_id, *params))}
+        f"SELECT date, COALESCE(SUM(amount), 0) AS total FROM expense WHERE season_id = ?{where_} GROUP BY date",
+        (season_id, *params_all))}
     dry_cost = {}
-    for r in db.execute(f"""
-        SELECT date, COALESCE(SUM(COALESCE(cost_electricity, 0) + COALESCE(cost_water, 0) +
-                               COALESCE(cost_firewood, 0) + COALESCE(cost_labor, 0)), 0) AS cost
-        FROM drying_run{where} GROUP BY date
-    """, (season_id, *params)):
+    for r in db.execute(
+        f"SELECT date, COALESCE(SUM(COALESCE(cost_electricity, 0) + COALESCE(cost_water, 0) + "
+        f"COALESCE(cost_firewood, 0) + COALESCE(cost_labor, 0)), 0) AS cost "
+        f"FROM drying_run WHERE season_id = ?{where_} GROUP BY date",
+        (season_id, *params_all)):
         dry_cost[r["date"]] = float(r["cost"] or 0)
 
     all_dates = sorted(set(sales) | set(exp) | set(dry_cost), reverse=True)
@@ -1238,4 +1355,3 @@ def get_cashflow(season_id: int, date_from: str | None = None,
         "outflow_total": outflow_total,
         "net_total": inflow_total - outflow_total,
     }
-

@@ -6,7 +6,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, abort, Response,
 )
-from db import init_db, get_db, close_db
+from db import init_db, migrate_db, get_db, close_db
 from auth import (
     login_user, logout_user, current_user, login_required,
     verify_password, change_password,
@@ -23,6 +23,7 @@ app.config["JSON_AS_ASCII"] = False
 # Инициализируем БД и сидируем данные при загрузке модуля,
 # чтобы это работало и при запуске, и при импорте в тестах.
 init_db()
+migrate_db()
 with app.app_context():
     seed_if_empty()
 
@@ -177,18 +178,39 @@ def home():
     cost = models.get_cost_per_kg_dry(season_id)
     margin = models.get_margin(season_id)
 
+    # Notifications
+    settings = models.get_all_settings()
+    fridge_notify_min = float(settings.get("fridge_notify_min", "450"))
+    fridge_notify_max = float(settings.get("fridge_notify_max", "500"))
+    min_drying_load = float(settings.get("min_drying_load", "100"))
+    total_fridge = sum(fridge_stock.values())
+    notifications = []
+    if total_fridge >= fridge_notify_max:
+        notifications.append({"type": "danger", "text": f"Холодильник заполнен! {total_fridge:.1f} кг"})
+    elif total_fridge >= fridge_notify_min:
+        notifications.append({"type": "warning", "text": f"Холодильник: {total_fridge:.1f} кг. Пора загрузить сушилку."})
+    if 0 < total_fridge < min_drying_load:
+        need = min_drying_load - total_fridge
+        notifications.append({"type": "info", "text": f"Для запуска сушилки нужно минимум {min_drying_load:.0f} кг. Сейчас {total_fridge:.1f} кг. Нужно ещё закупить {need:.1f} кг."})
+    # Drying ready notifications (started_at + 12h)
+    from datetime import datetime
+    now = datetime.now()
+    for r in models.list_drying_runs_all(season_id):
+        if r.get("started_at") and not r.get("finished_at"):
+            try:
+                started = datetime.fromisoformat(r["started_at"])
+                hours = (now - started).total_seconds() / 3600
+                if hours >= 12:
+                    notifications.append({"type": "success", "text": f"Сушка #{r['id']} готова! Прошло {hours:.0f}ч с момента загрузки."})
+            except (ValueError, TypeError):
+                pass
+
     return render_template(
         "home.html",
         grades=grades,
         raw_stock=raw_stock,
         dry_stock=dry_stock,
         fridge_stock=fridge_stock,
-        season_totals=season_totals,
-        season_yield=season_yield,
-        season_sales=season_sales,
-        season_expenses=season_expenses,
-        cost=cost,
-        margin=margin,
         accepted_today_kg=accepted_today_kg,
         accepted_today_amount=accepted_today_amount,
         today_drying=today_drying,
@@ -197,13 +219,23 @@ def home():
         today_sales=today_sales,
         today_expenses=today_expenses,
         today=today,
+        notifications=notifications,
     )
 
 
-@app.route("/settings", methods=["GET"])
+@app.route("/settings", methods=["GET", "POST"])
 @login_required
 def settings():
-    return render_template("settings.html")
+    if request.method == "POST":
+        # Save notification thresholds
+        for key in ("fridge_notify_min", "fridge_notify_max", "min_drying_load"):
+            val = request.form.get(key, "").strip()
+            if val:
+                models.set_setting(key, val)
+        flash("Настройки сохранены", "ok")
+        return redirect(url_for("settings"))
+    return render_template("settings.html",
+                           settings=models.get_all_settings())
 
 
 @app.route("/settings/password", methods=["POST"])
@@ -354,7 +386,7 @@ def acceptance_quick_supplier():
     """Быстрое создание поставщика прямо с приёмки. Возврат на /acceptance?date=..."""
     name = (request.form.get("name") or "").strip()
     phone = (request.form.get("phone") or "").strip()
-    notes = (request.form.get("notes") or "").strip()
+    notes = (request.form.get("supplier_notes") or "").strip()
     if not name:
         flash("Имя поставщика обязательно", "err")
         return redirect(request.referrer or url_for("acceptance"))
@@ -514,21 +546,11 @@ def drying():
     if request.method == "POST":
         form_date = request.form.get("date") or today
         raw_by_grade = {g["id"]: _parse_kg(request.form.get(f"raw_{g['id']}")) for g in grades}
-        dry_by_grade = {g["id"]: _parse_kg(request.form.get(f"dry_{g['id']}")) for g in grades}
-        cost_el = _parse_kg(request.form.get("cost_electricity"))
-        cost_wt = _parse_kg(request.form.get("cost_water"))
-        cost_fw = _parse_kg(request.form.get("cost_firewood"))
-        cost_lb = _parse_kg(request.form.get("cost_labor"))
         notes = request.form.get("notes") or ""
-
-        # Валидация: должен быть хотя бы один заполненный сорт
         total_raw = sum(raw_by_grade.values())
-        total_dry = sum(dry_by_grade.values())
-        if total_raw <= 0 and total_dry <= 0:
-            flash("Не введено ни одного значения", "err")
+        if total_raw <= 0:
+            flash("Не введено ни одного значения загрузки", "err")
             return redirect(url_for("drying"))
-
-        # Валидация: нельзя загрузить больше сырья, чем есть на остатке
         over = []
         for g in grades:
             if raw_by_grade[g["id"]] > raw_stock[g["id"]] + 0.001:
@@ -536,26 +558,22 @@ def drying():
         if over:
             flash("Недостаточно сырья: " + "; ".join(over), "err")
             return redirect(url_for("drying"))
-
-        # Валидация: сухого не может быть больше сырья
-        for g in grades:
-            r = raw_by_grade[g["id"]]
-            d = dry_by_grade[g["id"]]
-            if d > r + 0.001:
-                flash(f"{g['display_name']}: получено {d:.2f} кг > загружено {r:.2f} кг", "err")
-                return redirect(url_for("drying"))
-
-        models.add_drying_run(
-            form_date, season_id,
-            raw_by_grade, dry_by_grade,
-            cost_el, cost_wt, cost_fw, cost_lb, notes,
-        )
-        flash("Запись сушки сохранена", "ok")
+        from datetime import datetime
+        now = datetime.now().isoformat(timespec="seconds")
+        models.add_drying_run(form_date, season_id, raw_by_grade, notes=notes, started_at=now)
+        flash("Сушка запущена", "ok")
         return redirect(url_for("drying"))
 
-    # GET
     selected_date = request.args.get("date") or today
     runs = models.list_drying_runs_for_date(selected_date, season_id)
+    # Mark status
+    for r in runs:
+        if r.get("finished_at"):
+            r["status"] = "done"
+        elif r.get("started_at"):
+            r["status"] = "drying"
+        else:
+            r["status"] = "queued"
     season_yield = models.get_drying_yield_season(season_id)
     return render_template(
         "drying.html",
@@ -568,12 +586,68 @@ def drying():
     )
 
 
+@app.route("/drying/<int:run_id>/finish", methods=["GET", "POST"])
+@login_required
+def drying_finish(run_id):
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    grades = models.list_grades()
+    run = models.get_drying_run(run_id)
+    if not run:
+        flash("Запись сушки не найдена", "err")
+        return redirect(url_for("drying"))
+    if request.method == "POST":
+        dry_by_grade = {g["id"]: _parse_kg(request.form.get(f"dry_{g['id']}")) for g in grades}
+        for g in grades:
+            r = run.get(f"raw_grade_{g['id']}_kg", 0)
+            d = dry_by_grade[g["id"]]
+            if d > r + 0.001:
+                flash(f"{g['display_name']}: получено {d:.2f} кг > загружено {r:.2f} кг", "err")
+                return redirect(url_for("drying_finish", run_id=run_id))
+        models.finish_drying(run_id, dry_by_grade)
+        flash("Сушка завершена", "ok")
+        return redirect(url_for("drying"))
+    return render_template("drying_finish.html", run=run, grades=grades)
+
+
 @app.route("/drying/<int:run_id>/delete", methods=["POST"])
 @login_required
 def drying_delete(run_id):
     models.delete_drying_run(run_id)
     flash("Запись сушки удалена", "ok")
     return redirect(request.referrer or url_for("drying"))
+
+
+@app.route("/drying-expenses", methods=["GET", "POST"])
+@login_required
+def drying_expenses():
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    runs = models.list_drying_runs_all(season_id)
+    if request.method == "POST":
+        run_id_raw = request.form.get("run_id") or ""
+        if not run_id_raw.isdigit():
+            flash("Выберите запись сушки", "err")
+            return redirect(url_for("drying_expenses"))
+        run_id = int(run_id_raw)
+        cost_el = _parse_kg(request.form.get("cost_electricity"))
+        cost_wt = _parse_kg(request.form.get("cost_water"))
+        cost_fw = _parse_kg(request.form.get("cost_firewood"))
+        cost_lb = _parse_kg(request.form.get("cost_labor"))
+        notes = request.form.get("notes") or ""
+        models.add_drying_expense(run_id, cost_el, cost_wt, cost_fw, cost_lb, notes)
+        flash("Расходы на сушку сохранены", "ok")
+        return redirect(url_for("drying_expenses"))
+    # GET: show expenses per run
+    expenses_by_run = {}
+    for r in runs:
+        exps = models.get_drying_expenses(r["id"])
+        total = sum(e["cost_electricity"] + e["cost_water"] + e["cost_firewood"] + e["cost_labor"] for e in exps)
+        expenses_by_run[r["id"]] = {"expenses": exps, "total": total}
+    return render_template("drying_expenses.html", runs=runs, expenses_by_run=expenses_by_run)
 
 
 # --- Мусор --------------------------------------------------------------------
@@ -707,26 +781,26 @@ def sales():
         form_date = request.form.get("date") or today
         buyer_id_raw = request.form.get("buyer_id") or ""
         buyer_id = int(buyer_id_raw) if buyer_id_raw.isdigit() else None
-        try:
-            grade_id = int(request.form.get("grade_id") or 0)
-        except ValueError:
-            grade_id = 0
-        w = _parse_kg(request.form.get("weight_kg"))
-        p = _parse_kg(request.form.get("price_per_kg"))
-
-        if grade_id <= 0 or w <= 0 or p < 0:
-            flash("Заполните сорт, вес и цену", "err")
+        notes = request.form.get("notes") or ""
+        lines = []
+        for g in grades:
+            w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            p = _parse_kg(request.form.get(f"price_{g['id']}"))
+            if w > 0 and p >= 0:
+                lines.append((g["id"], w, p))
+        if not lines:
+            flash("Не введено ни одного значения веса", "err")
             return redirect(url_for("sales"))
-        if w > dry_stock.get(grade_id, 0) + 0.001:
-            gname = next((g["display_name"] for g in grades if g["id"] == grade_id), "?")
-            flash(f"Недостаточно сухого {gname}: остаток {dry_stock.get(grade_id, 0):.2f} кг, продаёте {w:.2f}", "err")
-            return redirect(url_for("sales"))
-
-        models.add_sale(form_date, season_id, buyer_id, grade_id, w, p)
-        flash(f"Продажа записана: {w:.2f} кг · {w*p:.2f} ₽", "ok")
+        # Validate stock
+        for gid, w, p in lines:
+            if w > dry_stock.get(gid, 0) + 0.001:
+                gname = next((g["display_name"] for g in grades if g["id"] == gid), "?")
+                flash(f"Недостаточно сухого {gname}: остаток {dry_stock.get(gid, 0):.2f} кг, продаёте {w:.2f}", "err")
+                return redirect(url_for("sales"))
+        models.add_sale(form_date, season_id, buyer_id, lines, notes)
+        flash(f"Продажа сохранена: {len(lines)} сорт(ов)", "ok")
         return redirect(url_for("sales"))
 
-    # GET
     selected_date = request.args.get("date") or today
     rows = models.list_sales_for_date(selected_date, season_id)
     season_sales = models.get_sales_total_season(season_id)
@@ -740,6 +814,39 @@ def sales():
         rows=rows,
         season_sales=season_sales,
     )
+
+
+@app.route("/sales/<int:sale_id>/edit", methods=["GET", "POST"])
+@login_required
+def sales_edit(sale_id):
+    season = get_active_season()
+    if season is None:
+        return redirect(url_for("first_run"))
+    season_id = season["id"]
+    grades = models.list_grades()
+    buyers = models.list_buyers()
+    rec = models.get_sale(sale_id)
+    if not rec:
+        flash("Продажа не найдена", "err")
+        return redirect(url_for("sales"))
+    if request.method == "POST":
+        form_date = request.form.get("date") or rec["date"]
+        buyer_id_raw = request.form.get("buyer_id") or ""
+        buyer_id = int(buyer_id_raw) if buyer_id_raw.isdigit() else None
+        notes = request.form.get("notes") or ""
+        lines = []
+        for g in grades:
+            w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            p = _parse_kg(request.form.get(f"price_{g['id']}"))
+            if w > 0 and p >= 0:
+                lines.append((g["id"], w, p))
+        if not lines:
+            flash("Не введено ни одного значения веса", "err")
+            return redirect(url_for("sales_edit", sale_id=sale_id))
+        models.update_sale(sale_id, form_date, season_id, buyer_id, lines, notes)
+        flash("Продажа обновлена", "ok")
+        return redirect(url_for("sales"))
+    return render_template("sales_edit.html", rec=rec, grades=grades, buyers=buyers)
 
 
 @app.route("/sales/<int:sale_id>/delete", methods=["POST"])
