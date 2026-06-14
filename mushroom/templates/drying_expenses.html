@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Расходы на сушку — Учёт грибов{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-4">
+    <h1 class="text-xl font-semibold text-gray-900 px-1">Расходы на сушку</h1>
+
+    <form method="post" class="bg-white rounded-2xl border border-gray-200 p-4 space-y-4">
+        <h2 class="font-medium text-gray-900">Добавить расходы</h2>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Запись сушки</label>
+            <select name="run_id" required
+                    class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                <option value="">— выбрать —</option>
+                {% for r in runs %}
+                <option value="{{ r.id }}">{{ r.date|dmy }} · загружено {{ r.total_raw|kg }} → получено {{ r.total_dry|kg }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <p class="block text-sm font-medium text-gray-700 mb-1">Расходы, ₽</p>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-0.5">Свет, ₽</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal" name="cost_electricity" placeholder="0"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-0.5">Вода, ₽</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal" name="cost_water" placeholder="0"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-0.5">Дрова, ₽</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal" name="cost_firewood" placeholder="0"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-0.5">Зарплата, ₽</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal" name="cost_labor" placeholder="0"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Заметка (необязательно)</label>
+            <input type="text" name="notes" maxlength="200"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        </div>
+
+        <button type="submit"
+                class="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition">
+            Сохранить расходы
+        </button>
+    </form>
+
+    <div class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h2 class="font-medium text-gray-900">Расходы по записям сушки</h2>
+        </div>
+        {% if runs %}
+        <ul class="divide-y divide-gray-100">
+            {% for r in runs %}
+            {% set exp = expenses_by_run[r.id] %}
+            <li class="px-4 py-3">
+                <div class="flex justify-between items-center">
+                    <div class="text-sm">
+                        <span class="font-medium text-gray-900">{{ r.date|dmy }}</span>
+                        <span class="text-gray-500"> · {{ r.total_raw|kg }} → {{ r.total_dry|kg }}</span>
+                    </div>
+                    <span class="text-sm font-semibold text-gray-700">{{ exp.total|money }}</span>
+                </div>
+                {% if exp.expenses %}
+                <div class="mt-1 text-xs text-gray-500">
+                    {% for e in exp.expenses %}
+                        {% if e.cost_electricity %}свет {{ e.cost_electricity|money }}{% endif %}
+                        {% if e.cost_water %} · вода {{ e.cost_water|money }}{% endif %}
+                        {% if e.cost_firewood %} · дрова {{ e.cost_firewood|money }}{% endif %}
+                        {% if e.cost_labor %} · зарпл. {{ e.cost_labor|money }}{% endif %}
+                        {% if e.notes %} · {{ e.notes }}{% endif %}
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет записей сушки</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

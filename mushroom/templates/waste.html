@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% block title %}Мусор и отходы — Учёт грибов{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-4">
+    <h1 class="text-xl font-semibold text-gray-900 px-1">Мусор и отходы</h1>
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-2">Сегодня</h2>
+        <div class="grid grid-cols-3 gap-3 text-center">
+            <div>
+                <p class="text-xs text-gray-500">Принято</p>
+                <p class="text-lg font-semibold text-gray-700">{{ accepted_today|kg }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">Мусор</p>
+                <p class="text-lg font-semibold text-gray-700">{{ waste_today|kg }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">% отходов</p>
+                <p class="text-lg font-semibold {% if waste_pct > 25 %}text-red-600{% else %}text-amber-600{% endif %}">
+                    {{ waste_pct|round(1) }}%
+                </p>
+            </div>
+        </div>
+        {% if accepted_today == 0 %}
+        <p class="text-xs text-gray-400 mt-2 text-center">Чтобы рассчитался %, нужно сначала внести приёмку за этот день</p>
+        {% endif %}
+    </div>
+
+    <form method="post" class="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
+        <h2 class="font-medium text-gray-900">Записать мусор</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Дата</label>
+                <input type="date" name="date" value="{{ selected_date }}" required
+                       class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Приёмка</label>
+                <select name="acceptance_id" id="acceptance-select"
+                        class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                        onchange="onAcceptanceChange()">
+                    <option value="">— выбрать приёмку —</option>
+                    {% for acc in acceptances %}
+                        <option value="{{ acc.id }}"
+                                data-date="{{ acc.date }}"
+                                data-supplier="{{ acc.supplier_name or '' }}"
+                                data-grade-1="{{ acc.grades.get(1, 0) }}"
+                                data-grade-2="{{ acc.grades.get(2, 0) }}"
+                                data-grade-3="{{ acc.grades.get(3, 0) }}">
+                            Приёмка #{{ acc.id }} · {{ acc.date|dmy }}{% if acc.supplier_name %} · {{ acc.supplier_name }}{% endif %} · {{ acc.total_kg|kg }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div id="acceptance-info" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+            <p class="font-medium text-blue-800 mb-1">Принято по приёмке:</p>
+            <div class="grid grid-cols-3 gap-2 text-center">
+                <div>
+                    <p class="text-xs text-blue-600">1 сорт</p>
+                    <p class="font-semibold text-blue-800" id="acc-g1">0,00 кг</p>
+                </div>
+                <div>
+                    <p class="text-xs text-blue-600">2 сорт</p>
+                    <p class="font-semibold text-blue-800" id="acc-g2">0,00 кг</p>
+                </div>
+                <div>
+                    <p class="text-xs text-blue-600">3 сорт</p>
+                    <p class="font-semibold text-blue-800" id="acc-g3">0,00 кг</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="hidden md:grid grid-cols-12 gap-2 px-3 py-2 bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+                <div class="col-span-3">Сорт</div>
+                <div class="col-span-3 text-right">Мусор, кг</div>
+                <div class="col-span-3 text-right">В холодильник, кг</div>
+                <div class="col-span-3"></div>
+            </div>
+            {% for g in grades %}
+            <div class="border-t border-gray-200 first:border-t-0 md:grid md:grid-cols-12 md:gap-2 md:items-center px-3 py-3 md:py-2">
+                <div class="md:col-span-3 text-sm font-medium text-gray-700">{{ g.display_name }}</div>
+                <div class="md:col-span-3 mt-2 md:mt-0">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">Мусор, кг</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal"
+                           name="weight_{{ g.id }}"
+                           id="waste-{{ g.id }}"
+                           placeholder="0"
+                           class="js-waste w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right"
+                           oninput="calcWaste()">
+                    <p class="text-xs text-gray-400 mt-0.5 js-remaining-hint" id="remaining-{{ g.id }}">остаток неизвестен</p>
+                </div>
+                <div class="md:col-span-3 mt-2 md:mt-0">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">В холодильник, кг</label>
+                    <input type="number" step="0.01" readonly
+                           id="cleaned-{{ g.id }}"
+                           class="js-cleaned w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-lg text-right text-gray-700"
+                           placeholder="авто">
+                    <input type="hidden" name="cleaned_{{ g.id }}" id="cleaned-hidden-{{ g.id }}">
+                </div>
+                <div class="md:col-span-3"></div>
+            </div>
+            {% endfor %}
+            <div class="px-3 py-2 bg-gray-50 flex justify-between items-center border-t border-gray-200">
+                <span class="text-sm text-gray-600">Итого мусора / в холодильник:</span>
+                <span class="js-waste-total text-lg font-semibold text-gray-700">0,00 / 0,00 кг</span>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Заметка (необязательно)</label>
+            <input type="text" name="notes" maxlength="200"
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        </div>
+
+        <button type="submit"
+                class="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition">
+            Записать
+        </button>
+    </form>
+
+    <div class="bg-white rounded-2xl border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="font-medium text-gray-900">Записи за {{ selected_date|dmy }}</h2>
+            <span class="text-sm text-gray-500">{{ rows|length }} шт.</span>
+        </div>
+
+        {% if rows %}
+            <ul class="divide-y divide-gray-100">
+                {% for r in rows %}
+                <li class="px-4 py-3">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="text-sm flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-medium text-gray-900">Запись #{{ r.id }}</span>
+                                {% if r.acceptance_id %}
+                                <span class="text-gray-500">·</span>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Приёмка #{{ r.acceptance_id }}</span>
+                                {% endif %}
+                                {% if r.supplier_name %}
+                                <span class="text-gray-500">·</span>
+                                <span class="text-gray-700">{{ r.supplier_name }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="text-gray-700 font-semibold mt-0.5">{{ r.total_kg|kg }}</div>
+                            {% set cleaned_total = (r.cleaned_grade_1_kg or 0) + (r.cleaned_grade_2_kg or 0) + (r.cleaned_grade_3_kg or 0) %}
+                            {% if cleaned_total > 0 %}
+                            <div class="text-emerald-600 text-xs mt-0.5">→ в холодильник {{ cleaned_total|kg }}</div>
+                            {% endif %}
+                            {% if r.notes %}
+                            <div class="text-xs text-gray-500 mt-0.5 truncate">{{ r.notes }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <a href="{{ url_for('waste_edit', record_id=r.id) }}"
+                               class="text-gray-500 hover:text-gray-700 p-1" title="Редактировать">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </a>
+                            <form method="post" action="{{ url_for('waste_delete', record_id=r.id) }}"
+                                  onsubmit="return confirm('Удалить запись мусора #{{ r.id }}?')">
+                                <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">1 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_1_kg|kg }}</div>
+                        </div>
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">2 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_2_kg|kg }}</div>
+                        </div>
+                        <div class="bg-gray-50 rounded p-2">
+                            <div class="text-gray-500">3 сорт</div>
+                            <div class="text-gray-900 font-semibold">{{ r.grade_3_kg|kg }}</div>
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+
+            {% set day_total = rows|sum(attribute='total_kg') %}
+            <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex justify-between text-sm">
+                <span class="text-gray-600">Итого за день:</span>
+                <span class="font-semibold">{{ day_total|kg }}</span>
+            </div>
+        {% else %}
+            <p class="px-4 py-6 text-sm text-gray-400 text-center">Нет записей за эту дату</p>
+        {% endif %}
+    </div>
+
+    {% if accepted_total_season > 0 %}
+    <div class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-2">Итог за сезон (по сортам)</h2>
+        <div class="grid grid-cols-3 gap-3 text-center mb-3">
+            {% for g in grades %}
+            <div>
+                <p class="text-xs text-gray-500">{{ g.display_name }}</p>
+                <p class="text-lg font-semibold text-gray-700">{{ waste_by_grade_season[g.id]|kg }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="grid grid-cols-3 gap-3 text-center pt-3 border-t border-gray-100">
+            <div>
+                <p class="text-xs text-gray-500">Принято</p>
+                <p class="text-lg font-semibold text-gray-700">{{ accepted_total_season|kg }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">Мусор</p>
+                <p class="text-lg font-semibold text-gray-700">{{ waste_total_season|kg }}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500">% отходов</p>
+                <p class="text-lg font-semibold {% if waste_pct_season > 25 %}text-red-600{% else %}text-amber-600{% endif %}">
+                    {{ waste_pct_season|round(1) }}%
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const ACCEPTANCES = {
+    {% for acc in acceptances %}
+    {{ acc.id }}: {
+        date: '{{ acc.date }}',
+        supplier: '{{ acc.supplier_name or '' }}',
+        grades: { 1: {{ acc.grades.get(1, 0) }}, 2: {{ acc.grades.get(2, 0) }}, 3: {{ acc.grades.get(3, 0) }}, }
+    },
+    {% endfor %}
+};
+
+function onAcceptanceChange() {
+    const sel = document.getElementById('acceptance-select');
+    const info = document.getElementById('acceptance-info');
+    const acc = ACCEPTANCES[sel.value];
+    if (!acc) {
+        info.classList.add('hidden');
+        [1,2,3].forEach(g => {
+            document.getElementById('waste-' + g).removeAttribute('max');
+            document.getElementById('cleaned-' + g).value = '';
+            document.getElementById('cleaned-hidden-' + g).value = '';
+            document.getElementById('remaining-' + g).textContent = 'остаток неизвестен';
+        });
+        calcWaste();
+        return;
+    }
+    info.classList.remove('hidden');
+    document.getElementById('acc-g1').textContent = acc.grades[1].toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' кг';
+    document.getElementById('acc-g2').textContent = acc.grades[2].toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' кг';
+    document.getElementById('acc-g3').textContent = acc.grades[3].toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' кг';
+    [1,2,3].forEach(g => {
+        const wInp = document.getElementById('waste-' + g);
+        const rem = acc.grades[g] || 0;
+        if (rem > 0) {
+            wInp.setAttribute('max', rem);
+            document.getElementById('remaining-' + g).textContent = 'остаток ' + rem.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' кг';
+        } else {
+            wInp.removeAttribute('max');
+            wInp.value = '';
+            document.getElementById('remaining-' + g).textContent = 'нет остатка';
+        }
+    });
+    calcWaste();
+}
+
+function calcWaste() {
+    const sel = document.getElementById('acceptance-select');
+    const acc = ACCEPTANCES[sel.value];
+    let totalWaste = 0;
+    let totalCleaned = 0;
+    [1,2,3].forEach(g => {
+        const wInp = document.getElementById('waste-' + g);
+        let w = parseFloat((wInp.value || '0').replace(',', '.')) || 0;
+        const maxVal = parseFloat(wInp.getAttribute('max'));
+        if (!isNaN(maxVal) && w > maxVal) {
+            wInp.value = maxVal;
+            w = maxVal;
+        }
+        totalWaste += w;
+        const cDisp = document.getElementById('cleaned-' + g);
+        const cHidden = document.getElementById('cleaned-hidden-' + g);
+        if (acc) {
+            const remaining = Math.max(0, (acc.grades[g] || 0) - w);
+            cDisp.value = remaining.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            cHidden.value = remaining.toFixed(2);
+            totalCleaned += remaining;
+        } else {
+            cDisp.value = '';
+            cHidden.value = '';
+        }
+    });
+    document.querySelector('.js-waste-total').textContent =
+        totalWaste.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' / ' +
+        totalCleaned.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' кг';
+}
+calcWaste();
+</script>
+{% endblock %}

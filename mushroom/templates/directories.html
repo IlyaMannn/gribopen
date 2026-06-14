@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}Справочники — Учёт грибов{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-5">
+    <h1 class="text-xl font-semibold text-gray-900 px-1">Справочники</h1>
+
+    <!-- Сорта -->
+    <section class="bg-white rounded-2xl border border-gray-200 p-4">
+        <h2 class="font-medium text-gray-900 mb-1">Сорта гриба</h2>
+        <p class="text-xs text-gray-500 mb-3">Сорта зашиты в системе, не меняются.</p>
+        <ul class="grid grid-cols-3 gap-2">
+            {% for g in grades %}
+            <li class="bg-emerald-50 text-emerald-800 rounded-lg py-2 text-center text-sm font-medium">
+                {{ g.display_name }}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <!-- Закупочные цены -->
+    <section id="prices" class="bg-white rounded-2xl border border-gray-200 p-4 scroll-mt-16">
+        <h2 class="font-medium text-gray-900 mb-1">Закупочные цены</h2>
+        <p class="text-xs text-gray-500 mb-3">
+            История изменений. В форме приёмки подставляется последняя цена, действующая на выбранную дату.
+        </p>
+
+        <form method="post" action="{{ url_for('directories_add_price') }}"
+              class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4 pb-4 border-b border-gray-200">
+            <select name="grade_id" required
+                    class="md:col-span-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                <option value="">— сорт —</option>
+                {% for g in grades %}<option value="{{ g.id }}">{{ g.display_name }}</option>{% endfor %}
+            </select>
+            <input type="number" step="0.01" min="0" inputmode="decimal" name="price_per_kg" required
+                   placeholder="Цена ₽/кг"
+                   class="md:col-span-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right">
+            <input type="date" name="effective_from" value="{{ today }}" required
+                   class="md:col-span-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            <button type="submit"
+                    class="md:col-span-1 bg-emerald-600 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition">
+                Добавить
+            </button>
+        </form>
+
+        {% if prices %}
+        <div class="overflow-x-auto -mx-4">
+            <table class="w-full text-sm">
+                <thead class="text-xs text-gray-500 uppercase">
+                    <tr class="border-b border-gray-200">
+                        <th class="text-left py-2 px-4 font-medium">Действует с</th>
+                        <th class="text-left py-2 px-4 font-medium">Сорт</th>
+                        <th class="text-right py-2 px-4 font-medium">Цена ₽/кг</th>
+                        <th class="py-2 px-4"></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for p in prices %}
+                    <tr>
+                        <td class="py-2 px-4 text-gray-700">{{ p.effective_from|dmy }}</td>
+                        <td class="py-2 px-4 text-gray-700">{{ p.grade_name }}</td>
+                        <td class="py-2 px-4 text-right font-semibold text-gray-900">{{ p.price_per_kg|money }}</td>
+                        <td class="py-2 px-4 text-right">
+                            <form method="post" action="{{ url_for('directories_delete_price', price_id=p.id) }}"
+                                  onsubmit="return confirm('Удалить запись цены?')" class="inline">
+                                <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-400 text-center py-4">Цены не заданы. Добавьте первую — она подставится в форму приёмки.</p>
+        {% endif %}
+    </section>
+
+    <!-- Поставщики -->
+    <section id="suppliers" class="bg-white rounded-2xl border border-gray-200 p-4 scroll-mt-16">
+        <h2 class="font-medium text-gray-900 mb-1">Поставщики</h2>
+        <p class="text-xs text-gray-500 mb-3">
+            Имена для памяти. Необязательно — можно приёмку без поставщика.
+        </p>
+
+        <form method="post" action="{{ url_for('directories_add_supplier') }}"
+              class="space-y-2 mb-4 pb-4 border-b border-gray-200">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input type="text" name="name" required maxlength="100"
+                       placeholder="Имя / название"
+                       class="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                <input type="text" name="phone" maxlength="50"
+                       placeholder="Телефон (необязательно)"
+                       class="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            </div>
+            <input type="text" name="notes" maxlength="200"
+                   placeholder="Заметка (необязательно)"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            <button type="submit"
+                    class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition">
+                Добавить поставщика
+            </button>
+        </form>
+
+        {% if suppliers %}
+        <ul class="divide-y divide-gray-100 -mx-4">
+            {% for s in suppliers %}
+            <li class="px-4 py-3 flex items-start justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-900">{{ s.name }}</div>
+                    {% if s.phone or s.notes %}
+                    <div class="text-xs text-gray-500 mt-0.5">
+                        {% if s.phone %}<span>{{ s.phone }}</span>{% endif %}
+                        {% if s.notes %}<span> · {{ s.notes }}</span>{% endif %}
+                    </div>
+                    {% endif %}
+                    <div class="text-xs text-gray-400 mt-0.5">Записей приёмки: {{ s.uses }}</div>
+                </div>
+                <details class="relative">
+                    <summary class="list-none cursor-pointer text-gray-500 hover:text-gray-700 p-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </summary>
+                    <form method="post" action="{{ url_for('directories_edit_supplier', supplier_id=s.id) }}"
+                          class="absolute right-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72 space-y-2">
+                        <input type="text" name="name" required value="{{ s.name }}" maxlength="100"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <input type="text" name="phone" value="{{ s.phone or '' }}" maxlength="50"
+                               placeholder="Телефон"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <input type="text" name="notes" value="{{ s.notes or '' }}" maxlength="200"
+                               placeholder="Заметка"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <button type="submit" class="w-full bg-emerald-600 text-white py-1.5 text-sm rounded font-medium hover:bg-emerald-700">
+                            Сохранить
+                        </button>
+                    </form>
+                </details>
+                <form method="post" action="{{ url_for('directories_delete_supplier', supplier_id=s.id) }}"
+                      onsubmit="return confirm('Удалить поставщика «{{ s.name }}»? {% if s.uses %}В {{ s.uses }} записях приёмки поставщик будет снят.{% endif %}')">
+                    <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
+                    </button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-gray-400 text-center py-4">Поставщиков нет. Это необязательное поле.</p>
+        {% endif %}
+    </section>
+
+    <!-- Покупатели -->
+    <section id="buyers" class="bg-white rounded-2xl border border-gray-200 p-4 scroll-mt-16">
+        <h2 class="font-medium text-gray-900 mb-1">Покупатели</h2>
+        <p class="text-xs text-gray-500 mb-3">
+            Имена для памяти. Необязательно — можно продажу без покупателя.
+        </p>
+
+        <form method="post" action="{{ url_for('directories_add_buyer') }}"
+              class="space-y-2 mb-4 pb-4 border-b border-gray-200">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <input type="text" name="name" required maxlength="100"
+                       placeholder="Имя / название"
+                       class="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                <input type="text" name="phone" maxlength="50"
+                       placeholder="Телефон (необязательно)"
+                       class="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            </div>
+            <input type="text" name="notes" maxlength="200"
+                   placeholder="Заметка (необязательно)"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            <button type="submit"
+                    class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition">
+                Добавить покупателя
+            </button>
+        </form>
+
+        {% if buyers %}
+        <ul class="divide-y divide-gray-100 -mx-4">
+            {% for b in buyers %}
+            <li class="px-4 py-3 flex items-start justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <div class="font-medium text-gray-900">{{ b.name }}</div>
+                    {% if b.phone or b.notes %}
+                    <div class="text-xs text-gray-500 mt-0.5">
+                        {% if b.phone %}<span>{{ b.phone }}</span>{% endif %}
+                        {% if b.notes %}<span> · {{ b.notes }}</span>{% endif %}
+                    </div>
+                    {% endif %}
+                    <div class="text-xs text-gray-400 mt-0.5">Продаж: {{ b.uses }}</div>
+                </div>
+                <details class="relative">
+                    <summary class="list-none cursor-pointer text-gray-500 hover:text-gray-700 p-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </summary>
+                    <form method="post" action="{{ url_for('directories_edit_buyer', buyer_id=b.id) }}"
+                          class="absolute right-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72 space-y-2">
+                        <input type="text" name="name" required value="{{ b.name }}" maxlength="100"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <input type="text" name="phone" value="{{ b.phone or '' }}" maxlength="50"
+                               placeholder="Телефон"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <input type="text" name="notes" value="{{ b.notes or '' }}" maxlength="200"
+                               placeholder="Заметка"
+                               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <button type="submit" class="w-full bg-emerald-600 text-white py-1.5 text-sm rounded font-medium hover:bg-emerald-700">
+                            Сохранить
+                        </button>
+                    </form>
+                </details>
+                <form method="post" action="{{ url_for('directories_delete_buyer', buyer_id=b.id) }}"
+                      onsubmit="return confirm('Удалить покупателя «{{ b.name }}»? {% if b.uses %}В {{ b.uses }} продажах покупатель будет снят.{% endif %}')">
+                    <button type="submit" class="text-red-500 hover:text-red-700 p-1" title="Удалить">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6 17.5 20A2 2 0 0 1 15.5 22h-7A2 2 0 0 1 6.5 20L5 6"/></svg>
+                    </button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-sm text-gray-400 text-center py-4">Покупателей нет. Это необязательное поле.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Database (БД содержит данные — не коммитим)
+mushroom.db
+mushroom.db-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs / артефакты запуска
+*.log
+*.err
+server.log
+server.err
+
+# Dev tools / large binaries
+.puppeteer/
+chrome/
+.pytest_cache/
+docs/
