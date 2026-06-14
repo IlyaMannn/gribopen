@@ -117,7 +117,7 @@ def update_season(season_id: int, name: str, start_date: str, end_date: str | No
 
 
 def delete_season(season_id: int) -> int:
-    """Hard delete сезона и всех связанных записей каскадно.
+    """Полное удаление сезона и всех связанных записей каскадно.
     Возвращает общее число затронутых строк (для информации)."""
     db = get_db()
     total = 0

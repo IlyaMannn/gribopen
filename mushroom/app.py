@@ -2,6 +2,7 @@
 from datetime import date, datetime, timedelta
 import csv
 import io
+import os
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, flash, abort, Response,
@@ -16,7 +17,7 @@ import models
 
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "mushroom-local-dev-secret-change-me"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "mushroom-local-dev-secret-change-me")
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 дней
 app.config["JSON_AS_ASCII"] = False
 

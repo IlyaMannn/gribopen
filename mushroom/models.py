@@ -971,7 +971,7 @@ def _date_filter(table_alias: str, date_from: str | None, date_to: str | None) -
 
 
 def _period_expr(group_by: str, date_col: str = "date") -> tuple[str, str]:
-    """Return (GROUP_BY_expr, SELECT_label_expr) for day/week/month grouping."""
+    """Вернуть (GROUP_BY_expr, SELECT_label_expr) для группировки по дню/неделе/месяцу."""
     if group_by == "week":
         expr = f"strftime('%Y-W%W', {date_col})"
     elif group_by == "month":
@@ -1150,7 +1150,7 @@ def get_cost_per_kg_dry(season_id: int, date_from: str | None = None,
     total_dry = sold_period + dry_stock
     cost_per_kg = total_invested / total_dry if total_dry > 0 else 0.0
 
-    # Sebestoimost po sortam
+    # Себестоимость по сортам
     by_grade = get_cost_per_kg_dry_by_grade(season_id, date_from, date_to)
 
     return {
@@ -1175,7 +1175,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
     where_s, params_s = _date_filter("s", date_from, date_to)
     where_e, params_e = _date_filter("", date_from, date_to)
 
-    # Accepted per grade
+    # Принято по сортам
     accepted = {}
     for r in db.execute(f"""
         SELECT ag.grade_id,
@@ -1190,7 +1190,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
     total_accepted_amount = sum(v["amount"] for v in accepted.values())
     total_accepted_kg = sum(v["kg"] for v in accepted.values())
 
-    # Dried per grade
+    # Высушено по сортам
     dried = {}
     for r in db.execute(f"""
         SELECT
@@ -1202,7 +1202,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
     """, (season_id, *params_d)):
         dried = {1: float(r["d1"] or 0), 2: float(r["d2"] or 0), 3: float(r["d3"] or 0)}
 
-    # Sold per grade
+    # Продано по сортам
     sold = {}
     for r in db.execute(f"""
         SELECT sl.grade_id, COALESCE(SUM(sl.weight_kg), 0) AS kg
@@ -1212,7 +1212,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
     """, (season_id, *params_s)):
         sold[r["grade_id"]] = float(r["kg"] or 0)
 
-    # Total drying + other cost
+    # Итого сушка + прочие расходы
     drying_cost = db.execute(f"""
         SELECT COALESCE(SUM(COALESCE(de.cost_electricity, 0) + COALESCE(de.cost_water, 0) +
             COALESCE(de.cost_firewood, 0) + COALESCE(de.cost_labor, 0)), 0) AS cost
@@ -1233,7 +1233,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
         sold_kg = sold.get(gid, 0.0)
         dry_stock = max(dry_kg - sold_kg, 0.0)
 
-        # Proportional shared cost by acceptance VALUE
+        # Пропорциональная доля по стоимости приёмки
         share = acc["amount"] / total_accepted_amount if total_accepted_amount > 0 else 0.0
         cost_share = shared_cost * share
         total_invested = acc["amount"] + cost_share
@@ -1252,7 +1252,7 @@ def get_cost_per_kg_dry_by_grade(season_id: int, date_from: str | None = None,
             "cost_per_kg": cost_per_kg,
         })
 
-    # Total row
+    # Итого строка
     total_row = {
         "grade_name": "Итого",
         "accepted_kg": total_accepted_kg,
@@ -1698,7 +1698,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
     pexpr_d, _ = _period_expr(group_by, "d.date")
     pexpr_e, _ = _period_expr(group_by, "date")
 
-    # Revenue by period+grade
+    # Выручка по периоду и сорту
     revenue = {}
     for r in db.execute(f"""
         SELECT {pexpr_s} AS period, sl.grade_id,
@@ -1711,7 +1711,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
         key = (r["period"], r["grade_id"])
         revenue[key] = {"kg": float(r["kg"] or 0), "amount": float(r["amount"] or 0)}
 
-    # Cost by period+grade (acceptance)
+    # Затраты по периоду и сорту (приёмка)
     cost_raw = {}
     for r in db.execute(f"""
         SELECT {pexpr_a} AS period, ag.grade_id,
@@ -1724,7 +1724,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
         key = (r["period"], r["grade_id"])
         cost_raw[key] = {"kg": float(r["kg"] or 0), "amount": float(r["amount"] or 0)}
 
-    # Total drying cost by period
+    # Итого расходы на сушку по периоду
     drying_cost = {}
     for r in db.execute(f"""
         SELECT {pexpr_d} AS period,
@@ -1737,7 +1737,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
     """, (season_id, *params_d)):
         drying_cost[r["period"]] = float(r["cost"] or 0)
 
-    # Total expense by period
+    # Итого прочие расходы по периоду
     other_cost = {}
     for r in db.execute(f"""
         SELECT {pexpr_e} AS period, COALESCE(SUM(amount), 0) AS cost
@@ -1746,7 +1746,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
     """, (season_id, *params_e)):
         other_cost[r["period"]] = float(r["cost"] or 0)
 
-    # Total acceptance VALUE per period (for proportional allocation of drying/other costs)
+    # Итого стоимость приёмки за период (для пропорционального распределения)
     total_value_by_period = {}
     for key, val in cost_raw.items():
         per = key[0]
@@ -1759,7 +1759,7 @@ def get_profitability_by_grade(season_id: int, date_from: str | None = None,
         per, gid = key
         rev = revenue.get(key, {"kg": 0.0, "amount": 0.0})
         c = cost_raw.get(key, {"kg": 0.0, "amount": 0.0})
-        # Proportional drying + other cost (by acceptance value)
+        # Пропорциональная доля сушки и прочих расходов
         period_total_value = total_value_by_period.get(per, 0.0)
         share = c["amount"] / period_total_value if period_total_value > 0 else 0.0
         d_cost = drying_cost.get(per, 0.0) * share
@@ -1826,7 +1826,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
     pexpr_d, _ = _period_expr(group_by, "d.date")
     pexpr_e, _ = _period_expr(group_by, "date")
 
-    # Revenue by period+grade
+    # Выручка по периоду и сорту
     revenue = {}
     for r in db.execute(f"""
         SELECT {pexpr_s} AS period, sl.grade_id,
@@ -1839,7 +1839,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
         key = (r["period"], r["grade_id"])
         revenue[key] = {"kg": float(r["kg"] or 0), "amount": float(r["amount"] or 0)}
 
-    # Acceptance by period+grade (value + kg)
+    # Приёмка по периоду и сорту (стоимость и кг)
     accepted = {}
     for r in db.execute(f"""
         SELECT {pexpr_a} AS period, ag.grade_id,
@@ -1852,7 +1852,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
         key = (r["period"], r["grade_id"])
         accepted[key] = {"kg": float(r["kg"] or 0), "amount": float(r["amount"] or 0)}
 
-    # Dry output by period+grade
+    # Сухой выход по периоду и сорту
     dried = {}
     for r in db.execute(f"""
         SELECT {pexpr_d} AS period,
@@ -1866,7 +1866,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
         for gid, col in [(1, "d1"), (2, "d2"), (3, "d3")]:
             dried[(per, gid)] = float(r[col] or 0)
 
-    # Total drying cost by period
+    # Итого расходы на сушку по периоду
     drying_cost = {}
     for r in db.execute(f"""
         SELECT {pexpr_d} AS period,
@@ -1879,7 +1879,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
     """, (season_id, *params_d)):
         drying_cost[r["period"]] = float(r["cost"] or 0)
 
-    # Total expense by period
+    # Итого прочие расходы по периоду
     other_cost = {}
     for r in db.execute(f"""
         SELECT {pexpr_e} AS period, COALESCE(SUM(amount), 0) AS cost
@@ -1888,7 +1888,7 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
     """, (season_id, *params_e)):
         other_cost[r["period"]] = float(r["cost"] or 0)
 
-    # Total acceptance VALUE per period (for proportional allocation)
+    # Итого стоимость приёмки за период (для пропорционального распределения)
     total_value_by_period = {}
     for key, val in accepted.items():
         per = key[0]
@@ -1904,18 +1904,18 @@ def get_product_profitability(season_id: int, date_from: str | None = None,
         dry_kg = dried.get(key, 0.0)
         sold_kg = rev["kg"]
 
-        # Proportional drying + other cost by acceptance VALUE
+        # Пропорциональная доля сушки и прочих расходов
         period_total_value = total_value_by_period.get(per, 0.0)
         share = acc["amount"] / period_total_value if period_total_value > 0 else 0.0
         drying_share = drying_cost.get(per, 0.0) * share
         other_share = other_cost.get(per, 0.0) * share
 
-        # Cost of this grade's output
+        # Себестоимость продукции сорта
         total_grade_cost = acc["amount"] + drying_share + other_share
         cogs_per_kg = total_grade_cost / dry_kg if dry_kg > 0 else 0.0
         cogs_sold = sold_kg * cogs_per_kg
 
-        # Product profitability
+        # Рентабельность продукции
         profit = rev["amount"] - cogs_sold
         margin_pct = (profit / cogs_sold * 100) if cogs_sold > 0 else 0.0
 
