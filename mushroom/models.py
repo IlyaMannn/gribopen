@@ -25,11 +25,6 @@ def get_all_settings():
 
 # --- РЎРµР·РѕРЅС‹ ------------------------------------------------------------------
 
-def get_active_season_id() -> int | None:
-    db = get_db()
-    row = db.execute("SELECT id FROM season WHERE is_active = 1 ORDER BY id DESC LIMIT 1").fetchone()
-    return row["id"] if row else None
-
 
 # --- РЎРѕСЂС‚Р° --------------------------------------------------------------------
 
@@ -38,10 +33,6 @@ def list_grades() -> list[dict]:
     return [dict(r) for r in db.execute("SELECT * FROM grade ORDER BY sort_order")]
 
 
-def grade_by_id(grade_id: int) -> dict | None:
-    db = get_db()
-    row = db.execute("SELECT * FROM grade WHERE id = ?", (grade_id,)).fetchone()
-    return dict(row) if row else None
 
 
 # --- Р—Р°РєСѓРїРѕС‡РЅС‹Рµ С†РµРЅС‹ ----------------------------------------------------------
@@ -104,10 +95,6 @@ def list_suppliers() -> list[dict]:
     """)]
 
 
-def get_supplier(supplier_id: int) -> dict | None:
-    db = get_db()
-    row = db.execute("SELECT * FROM supplier WHERE id = ?", (supplier_id,)).fetchone()
-    return dict(row) if row else None
 
 
 def add_supplier(name: str, phone: str | None, notes: str | None) -> int:
@@ -216,16 +203,6 @@ def list_acceptance_for_date(date_: str, season_id: int) -> list[dict]:
     return rows
 
 
-def list_acceptance_for_season(season_id: int) -> list[dict]:
-    db = get_db()
-    return [dict(r) for r in db.execute("""
-        SELECT a.id, a.date, a.season_id, a.supplier_id, a.notes,
-               s.name AS supplier_name
-        FROM acceptance a
-        LEFT JOIN supplier s ON s.id = a.supplier_id
-        WHERE a.season_id = ?
-        ORDER BY a.date DESC, a.id DESC
-    """, (season_id,))]
 
 
 def update_acceptance(acceptance_id: int, date_: str,
@@ -653,18 +630,6 @@ def list_waste_records_for_date(date_: str, season_id: int) -> list[dict]:
     return rows
 
 
-def list_waste_records_for_season(season_id: int) -> list[dict]:
-    db = get_db()
-    rows = [dict(r) for r in db.execute("""
-        SELECT w.*, s.name AS supplier_name
-        FROM waste_record w
-        LEFT JOIN supplier s ON s.id = w.supplier_id
-        WHERE w.season_id = ?
-        ORDER BY w.date DESC, w.id DESC
-    """, (season_id,))]
-    for r in rows:
-        r["total_kg"] = float(r["grade_1_kg"] or 0) + float(r["grade_2_kg"] or 0) + float(r["grade_3_kg"] or 0)
-    return rows
 
 
 def delete_waste_record(record_id: int) -> None:
@@ -774,10 +739,6 @@ def list_buyers() -> list[dict]:
     """)]
 
 
-def get_buyer(buyer_id: int) -> dict | None:
-    db = get_db()
-    row = db.execute("SELECT * FROM buyer WHERE id = ?", (buyer_id,)).fetchone()
-    return dict(row) if row else None
 
 
 def add_buyer(name: str, phone: str | None, notes: str | None) -> int:
@@ -887,21 +848,6 @@ def delete_sale(sale_id):
     db.commit()
 
 
-def list_sales_for_season(season_id):
-    db = get_db()
-    sales = [dict(r) for r in db.execute(
-        "SELECT s.*, b.name AS buyer_name FROM sale s LEFT JOIN buyer b ON b.id = s.buyer_id WHERE s.season_id = ? ORDER BY s.date DESC, s.id DESC",
-        (season_id,),
-    ).fetchall()]
-    for s in sales:
-        s_lines = [dict(r) for r in db.execute(
-            "SELECT sl.*, g.display_name AS grade_name FROM sale_line sl JOIN grade g ON g.id = sl.grade_id WHERE sl.sale_id = ?",
-            (s["id"],),
-        ).fetchall()]
-        s["lines"] = s_lines
-        s["total_kg"] = sum(l["weight_kg"] for l in s_lines)
-        s["total_amount"] = sum(l["total_amount"] for l in s_lines)
-    return sales
 
 
 def get_sales_total_season(season_id):
@@ -960,13 +906,6 @@ def list_expenses_for_date(date_: str, season_id: int) -> list[dict]:
     """, (date_, season_id))]
 
 
-def list_expenses_for_season(season_id: int) -> list[dict]:
-    db = get_db()
-    return [dict(r) for r in db.execute("""
-        SELECT * FROM expense
-        WHERE season_id = ?
-        ORDER BY date DESC, id DESC
-    """, (season_id,))]
 
 
 def delete_expense(record_id: int) -> None:

@@ -1309,7 +1309,6 @@ def main():
     print(" Учёт грибов — локальный запуск")
     print(" Откройте в браузере: http://127.0.0.1:5000")
     print(" С телефона в той же WiFi: http://<IP-этого-ПК>:5000")
-    print(" Логин: admin   Пароль: admin")
     print("=" * 60)
     # debug=False чтобы не было reload-проблем; use_reloader=False
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
