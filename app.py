@@ -541,7 +541,7 @@ def drying():
     season_id = season["id"]
     grades = models.list_grades()
     today = date.today().isoformat()
-    raw_stock = models.get_raw_stock(season_id)
+    fridge_stock = models.get_fridge_stock(season_id)
 
     if request.method == "POST":
         form_date = request.form.get("date") or today
@@ -553,8 +553,8 @@ def drying():
             return redirect(url_for("drying"))
         over = []
         for g in grades:
-            if raw_by_grade[g["id"]] > raw_stock[g["id"]] + 0.001:
-                over.append(f"{g['display_name']}: {raw_by_grade[g['id']]:.2f} > остаток {raw_stock[g['id']]:.2f}")
+            if raw_by_grade[g["id"]] > fridge_stock[g["id"]] + 0.001:
+                over.append(f"{g['display_name']}: {raw_by_grade[g['id']]:.2f} > остаток {fridge_stock[g['id']]:.2f}")
         if over:
             flash("Недостаточно сырья: " + "; ".join(over), "err")
             return redirect(url_for("drying"))
@@ -580,7 +580,7 @@ def drying():
         grades=grades,
         today=today,
         selected_date=selected_date,
-        raw_stock=raw_stock,
+        fridge_stock=fridge_stock,
         runs=runs,
         season_yield=season_yield,
     )
@@ -666,21 +666,24 @@ def waste():
     if request.method == "POST":
         form_date = request.form.get("date") or today
         kg_by_grade = {}
+        cleaned_by_grade = {}
         total = 0.0
         for g in grades:
             w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            c = _parse_kg(request.form.get(f"cleaned_{g['id']}"))
             if w < 0:
                 w = 0
+            if c < 0:
+                c = 0
             kg_by_grade[g["id"]] = w
+            cleaned_by_grade[g["id"]] = c
             total += w
-        if total <= 0:
-            flash("Введите вес больше 0 хотя бы по одному сорту", "err")
-            return redirect(url_for("waste", date=form_date))
         supplier_id_raw = request.form.get("supplier_id") or ""
         supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
         notes = request.form.get("notes") or ""
-        models.add_waste_record(form_date, season_id, kg_by_grade, supplier_id, notes)
-        flash(f"Записан мусор: {total:.2f} кг", "ok")
+        total_cleaned = sum(cleaned_by_grade.values())
+        models.add_waste_record(form_date, season_id, kg_by_grade, cleaned_by_grade, supplier_id, notes)
+        flash(f"Записано: мусор {total:.2f} кг, в холодильник {total_cleaned:.2f} кг", "ok")
         return redirect(url_for("waste", date=form_date))
 
     # GET
@@ -730,15 +733,20 @@ def waste_edit(record_id):
     if request.method == "POST":
         form_date = request.form.get("date") or rec["date"]
         kg_by_grade = {}
+        cleaned_by_grade = {}
         for g in grades:
             w = _parse_kg(request.form.get(f"weight_{g['id']}"))
+            c = _parse_kg(request.form.get(f"cleaned_{g['id']}"))
             if w < 0:
                 w = 0
+            if c < 0:
+                c = 0
             kg_by_grade[g["id"]] = w
+            cleaned_by_grade[g["id"]] = c
         supplier_id_raw = request.form.get("supplier_id") or ""
         supplier_id = int(supplier_id_raw) if supplier_id_raw.isdigit() else None
         notes = request.form.get("notes") or ""
-        models.update_waste_record(record_id, form_date, kg_by_grade, supplier_id, notes)
+        models.update_waste_record(record_id, form_date, kg_by_grade, cleaned_by_grade, supplier_id, notes)
         flash("Запись мусора обновлена", "ok")
         return redirect(url_for("waste", date=form_date))
 

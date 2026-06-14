@@ -50,26 +50,36 @@
 
         <div class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="hidden md:grid grid-cols-12 gap-2 px-3 py-2 bg-gray-50 text-xs font-medium text-gray-500 uppercase">
-                <div class="col-span-4">Сорт</div>
-                <div class="col-span-4 text-right">Вес мусора, кг</div>
-                <div class="col-span-4"></div>
+                <div class="col-span-3">Сорт</div>
+                <div class="col-span-3 text-right">Мусор, кг</div>
+                <div class="col-span-3 text-right">В холодильник, кг</div>
+                <div class="col-span-3"></div>
             </div>
             {% for g in grades %}
             <div class="border-t border-gray-200 first:border-t-0 md:grid md:grid-cols-12 md:gap-2 md:items-center px-3 py-3 md:py-2">
-                <div class="md:col-span-4 text-sm font-medium text-gray-700">{{ g.display_name }}</div>
-                <div class="md:col-span-4 mt-2 md:mt-0">
+                <div class="md:col-span-3 text-sm font-medium text-gray-700">{{ g.display_name }}</div>
+                <div class="md:col-span-3 mt-2 md:mt-0">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">Мусор, кг</label>
                     <input type="number" step="0.01" min="0" inputmode="decimal"
                            name="weight_{{ g.id }}"
                            placeholder="0"
                            class="js-waste w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right"
                            oninput="calcWaste()">
                 </div>
-                <div class="md:col-span-4"></div>
+                <div class="md:col-span-3 mt-2 md:mt-0">
+                    <label class="block text-xs text-gray-500 mb-0.5 md:hidden">В холодильник, кг</label>
+                    <input type="number" step="0.01" min="0" inputmode="decimal"
+                           name="cleaned_{{ g.id }}"
+                           placeholder="0"
+                           class="js-cleaned w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none text-right"
+                           oninput="calcWaste()">
+                </div>
+                <div class="md:col-span-3"></div>
             </div>
             {% endfor %}
             <div class="px-3 py-2 bg-gray-50 flex justify-between items-center border-t border-gray-200">
-                <span class="text-sm text-gray-600">Итого мусора:</span>
-                <span class="js-waste-total text-lg font-semibold text-gray-700">0,00 кг</span>
+                <span class="text-sm text-gray-600">Итого мусора / в холодильник:</span>
+                <span class="js-waste-total text-lg font-semibold text-gray-700">0,00 / 0,00 кг</span>
             </div>
         </div>
 
@@ -183,13 +193,19 @@
 
 <script>
 function calcWaste() {
-    let total = 0;
+    let totalWaste = 0;
+    let totalCleaned = 0;
     document.querySelectorAll('.js-waste').forEach(inp => {
         const w = parseFloat((inp.value || '0').replace(',', '.')) || 0;
-        total += w;
+        totalWaste += w;
+    });
+    document.querySelectorAll('.js-cleaned').forEach(inp => {
+        const c = parseFloat((inp.value || '0').replace(',', '.')) || 0;
+        totalCleaned += c;
     });
     document.querySelector('.js-waste-total').textContent =
-        total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' кг';
+        totalWaste.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' / ' +
+        totalCleaned.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' кг';
 }
 calcWaste();
 </script>

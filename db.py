@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS waste_record (
     grade_1_kg REAL NOT NULL DEFAULT 0,
     grade_2_kg REAL NOT NULL DEFAULT 0,
     grade_3_kg REAL NOT NULL DEFAULT 0,
+    cleaned_grade_1_kg REAL NOT NULL DEFAULT 0,
+    cleaned_grade_2_kg REAL NOT NULL DEFAULT 0,
+    cleaned_grade_3_kg REAL NOT NULL DEFAULT 0,
     supplier_id INTEGER REFERENCES supplier(id),
     notes TEXT
 );
@@ -219,5 +222,10 @@ def migrate_db():
     # app_setting
     if "app_setting" not in existing:
         cur.execute("CREATE TABLE IF NOT EXISTS app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    # waste_record: add cleaned columns
+    if "waste_record" in existing and "cleaned_grade_1_kg" not in cols.get("waste_record", set()):
+        cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_1_kg REAL NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_2_kg REAL NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_3_kg REAL NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()

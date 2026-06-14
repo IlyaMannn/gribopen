@@ -260,7 +260,7 @@ def delete_acceptance(acceptance_id: int) -> None:
 # --- РћСЃС‚Р°С‚РєРё ------------------------------------------------------------------
 
 def get_raw_stock(season_id: int) -> dict[int, float]:
-    """Остатки сырья по сортам: принято − отправлено в сушку (без учёта мусора)."""
+    """Остатки сырья на складе (неочищенное): принято − очищено (мусор + в холодильник)."""
     db = get_db()
     out = {g["id"]: 0.0 for g in list_grades()}
 
@@ -272,28 +272,32 @@ def get_raw_stock(season_id: int) -> dict[int, float]:
     """, (season_id,)):
         out[r["grade_id"]] = float(r["kg"])
 
-    if out.get(1) or out.get(2) or out.get(3):
-        r = db.execute("""
-            SELECT
-                COALESCE(SUM(raw_grade_1_kg), 0) AS r1,
-                COALESCE(SUM(raw_grade_2_kg), 0) AS r2,
-                COALESCE(SUM(raw_grade_3_kg), 0) AS r3
-            FROM drying_run WHERE season_id = ?
-        """, (season_id,)).fetchone()
-        out[1] -= float(r["r1"])
-        out[2] -= float(r["r2"])
-        out[3] -= float(r["r3"])
+    waste = get_waste_total_season_by_grade(season_id)
+    cleaned = get_cleaned_total_season_by_grade(season_id)
+    for gid in (1, 2, 3):
+        out[gid] -= waste.get(gid, 0.0) + cleaned.get(gid, 0.0)
 
     return out
 
 
 def get_fridge_stock(season_id: int) -> dict[int, float]:
-    """Остатки в холодильнике (очищенное сырьё): принято − мусор − отправлено в сушку."""
-    raw = get_raw_stock(season_id)
-    waste = get_waste_total_season_by_grade(season_id)
-    for gid in (1, 2, 3):
-        raw[gid] -= waste.get(gid, 0.0)
-    return raw
+    """Остатки в холодильнике (очищенное): очищено − отправлено в сушку."""
+    db = get_db()
+    cleaned = get_cleaned_total_season_by_grade(season_id)
+    out = {gid: cleaned.get(gid, 0.0) for gid in (1, 2, 3)}
+
+    r = db.execute("""
+        SELECT
+            COALESCE(SUM(raw_grade_1_kg), 0) AS r1,
+            COALESCE(SUM(raw_grade_2_kg), 0) AS r2,
+            COALESCE(SUM(raw_grade_3_kg), 0) AS r3
+        FROM drying_run WHERE season_id = ?
+    """, (season_id,)).fetchone()
+    out[1] -= float(r["r1"])
+    out[2] -= float(r["r2"])
+    out[3] -= float(r["r3"])
+
+    return out
 
 
 def get_dry_stock(season_id: int) -> dict[int, float]:
@@ -506,19 +510,27 @@ def get_drying_yield_season(season_id: int) -> dict:
 
 def add_waste_record(date_: str, season_id: int,
                      kg_by_grade: dict[int, float],
+                     cleaned_by_grade: dict[int, float] | None = None,
                      supplier_id: int | None = None,
                      notes: str | None = None) -> int:
-    """Создать запись мусора с разбивкой по сортам. kg_by_grade = {1: kg, 2: kg, 3: kg}."""
+    """Создать запись мусора с разбивкой по сортам. kg_by_grade = {1: kg, 2: kg, 3: kg}.
+    cleaned_by_grade = {1: kg, 2: kg, 3: kg} — очищено, отправлено в холодильник."""
+    if cleaned_by_grade is None:
+        cleaned_by_grade = {1: 0, 2: 0, 3: 0}
     db = get_db()
     cur = db.execute("""
         INSERT INTO waste_record (date, season_id, grade_1_kg, grade_2_kg, grade_3_kg,
+                                  cleaned_grade_1_kg, cleaned_grade_2_kg, cleaned_grade_3_kg,
                                   supplier_id, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         date_, season_id,
         float(kg_by_grade.get(1, 0) or 0),
         float(kg_by_grade.get(2, 0) or 0),
         float(kg_by_grade.get(3, 0) or 0),
+        float(cleaned_by_grade.get(1, 0) or 0),
+        float(cleaned_by_grade.get(2, 0) or 0),
+        float(cleaned_by_grade.get(3, 0) or 0),
         supplier_id or None,
         (notes or "").strip() or None,
     ))
@@ -528,12 +540,16 @@ def add_waste_record(date_: str, season_id: int,
 
 def update_waste_record(record_id: int, date_: str,
                         kg_by_grade: dict[int, float],
+                        cleaned_by_grade: dict[int, float] | None = None,
                         supplier_id: int | None = None,
                         notes: str | None = None) -> None:
+    if cleaned_by_grade is None:
+        cleaned_by_grade = {1: 0, 2: 0, 3: 0}
     db = get_db()
     db.execute("""
         UPDATE waste_record
         SET date = ?, grade_1_kg = ?, grade_2_kg = ?, grade_3_kg = ?,
+            cleaned_grade_1_kg = ?, cleaned_grade_2_kg = ?, cleaned_grade_3_kg = ?,
             supplier_id = ?, notes = ?
         WHERE id = ?
     """, (
@@ -541,6 +557,9 @@ def update_waste_record(record_id: int, date_: str,
         float(kg_by_grade.get(1, 0) or 0),
         float(kg_by_grade.get(2, 0) or 0),
         float(kg_by_grade.get(3, 0) or 0),
+        float(cleaned_by_grade.get(1, 0) or 0),
+        float(cleaned_by_grade.get(2, 0) or 0),
+        float(cleaned_by_grade.get(3, 0) or 0),
         supplier_id or None,
         (notes or "").strip() or None,
         record_id,
@@ -620,6 +639,22 @@ def get_waste_total_season_by_grade(season_id: int) -> dict[int, float]:
     out[1] = float(row["g1"] or 0)
     out[2] = float(row["g2"] or 0)
     out[3] = float(row["g3"] or 0)
+    return out
+
+
+def get_cleaned_total_season_by_grade(season_id: int) -> dict[int, float]:
+    """Очищено (в холодильник) за сезон с разбивкой по сортам."""
+    db = get_db()
+    out = {1: 0.0, 2: 0.0, 3: 0.0}
+    row = db.execute("""
+        SELECT COALESCE(SUM(cleaned_grade_1_kg), 0) AS c1,
+               COALESCE(SUM(cleaned_grade_2_kg), 0) AS c2,
+               COALESCE(SUM(cleaned_grade_3_kg), 0) AS c3
+        FROM waste_record WHERE season_id = ?
+    """, (season_id,)).fetchone()
+    out[1] = float(row["c1"] or 0)
+    out[2] = float(row["c2"] or 0)
+    out[3] = float(row["c3"] or 0)
     return out
 
 
