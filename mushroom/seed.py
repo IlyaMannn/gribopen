@@ -121,7 +121,7 @@ def delete_season(season_id: int) -> int:
     Возвращает общее число затронутых строк (для информации)."""
     db = get_db()
     total = 0
-    # acceptance_grade удалится каскадно через acceptance
+    # позиции приёмки удалятся каскадно через приёмку
     cur = db.execute("SELECT COUNT(*) AS c FROM acceptance_grade ag "
                      "JOIN acceptance a ON a.id = ag.acceptance_id WHERE a.season_id = ?",
                      (season_id,))

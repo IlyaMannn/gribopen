@@ -1,4 +1,4 @@
-"""Flask-приложение: маршруты, маршрутизация, запуск."""
+"""Веб-приложение: маршруты, маршрутизация, запуск."""
 from datetime import date, datetime, timedelta
 import csv
 import io
@@ -179,7 +179,7 @@ def home():
     cost = models.get_cost_per_kg_dry(season_id)
     margin = models.get_margin(season_id)
 
-    # Notifications
+    # Уведомления
     settings = models.get_all_settings()
     fridge_notify_min = float(settings.get("fridge_notify_min", "450"))
     fridge_notify_max = float(settings.get("fridge_notify_max", "500"))
@@ -193,7 +193,7 @@ def home():
     if 0 < total_fridge < min_drying_load:
         need = min_drying_load - total_fridge
         notifications.append({"type": "info", "text": f"Для запуска сушилки нужно минимум {min_drying_load:.0f} кг. Сейчас {total_fridge:.1f} кг. Нужно ещё закупить {need:.1f} кг."})
-    # Drying ready notifications (started_at + 12h)
+    # Уведомления о готовности сушки (начало + 12ч)
     from datetime import datetime
     now = datetime.now()
     for r in models.list_drying_runs_all(season_id):
@@ -228,7 +228,7 @@ def home():
 @login_required
 def settings():
     if request.method == "POST":
-        # Save notification thresholds
+        # Сохранить пороги уведомлений
         for key in ("fridge_notify_min", "fridge_notify_max", "min_drying_load"):
             val = request.form.get(key, "").strip()
             if val:
@@ -298,7 +298,7 @@ def acceptance():
             flash("Не введено ни одного значения веса", "err")
         return redirect(url_for("acceptance", date=form_date))
 
-    # GET
+    
     selected_date = request.args.get("date") or today
     rows = models.list_acceptance_for_date(selected_date, season_id)
     latest_prices = models.latest_prices_dict(selected_date)
@@ -567,7 +567,7 @@ def drying():
 
     selected_date = request.args.get("date") or today
     runs = models.list_drying_runs_for_date(selected_date, season_id)
-    # Mark status
+    # Установить статус
     for r in runs:
         if r.get("finished_at"):
             r["status"] = "done"
@@ -657,7 +657,7 @@ def drying_expenses():
         models.add_drying_expense(run_id, cost_el, cost_wt, cost_fw, cost_lb, notes)
         flash("Расходы на сушку сохранены", "ok")
         return redirect(url_for("drying_expenses"))
-    # GET: show expenses per run
+    # Показать расходы по запускам
     expenses_by_run = {}
     for r in runs:
         exps = models.get_drying_expenses(r["id"])
@@ -724,7 +724,7 @@ def waste():
         flash(f"Записано: мусор {total:.2f} кг, в холодильник {total_cleaned:.2f} кг", "ok")
         return redirect(url_for("waste", date=form_date))
 
-    # GET
+    
     selected_date = request.args.get("date") or today
     rows = models.list_waste_records_for_date(selected_date, season_id)
     accepted_today = models.get_accepted_kg_by_date(selected_date, season_id)
@@ -862,7 +862,7 @@ def sales():
         if not lines:
             flash("Не введено ни одного значения веса", "err")
             return redirect(url_for("sales"))
-        # Validate stock
+        # Проверить остатки
         for gid, w, p in lines:
             if w > dry_stock.get(gid, 0) + 0.001:
                 gname = next((g["display_name"] for g in grades if g["id"] == gid), "?")
@@ -951,7 +951,7 @@ def expenses():
         flash(f"Расход записан: {category} · {amount:.2f} ₽", "ok")
         return redirect(url_for("expenses"))
 
-    # GET
+    
     selected_date = request.args.get("date") or today
     rows = models.list_expenses_for_date(selected_date, season_id)
     season_expenses = models.get_expenses_total_season(season_id)
@@ -1073,7 +1073,7 @@ def reports():
     season_id = season["id"]
     today = date.today()
 
-    # Пресеты: season, today, yesterday, week, month, all
+    # Пресеты: сезон, сегодня, вчера, неделя, месяц, всё
     preset = request.args.get("preset", "season")
     date_from = request.args.get("date_from", "").strip() or None
     date_to = request.args.get("date_to", "").strip() or None
@@ -1093,7 +1093,7 @@ def reports():
         elif preset == "season":
             date_from = season["start_date"]
             date_to = season["end_date"] or today.isoformat()
-        # else: all time (both None)
+        # иначе: всё время
 
     group_by = request.args.get("group_by", "day")
     if group_by not in ("day", "week", "month"):
@@ -1178,7 +1178,7 @@ def reports_export_csv():
 
     section = request.args.get("section", "daily")
     buf = io.StringIO()
-    # BOM для корректного открытия в Excel на Windows
+    # Метка начала файла для корректного открытия в табличных редакторах
     buf.write("\ufeff")
     writer = csv.writer(buf, delimiter=";")
 
@@ -1311,7 +1311,7 @@ def main():
     print(" Откройте в браузере: http://127.0.0.1:5000")
     print(" С телефона в той же WiFi: http://<IP-этого-ПК>:5000")
     print("=" * 60)
-    # debug=False чтобы не было reload-проблем; use_reloader=False
+    # Отключён автоперезапуск для стабильности
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
 
 

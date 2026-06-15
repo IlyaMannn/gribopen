@@ -26,7 +26,7 @@ def get_all_settings():
 # --- РЎРµР·РѕРЅС‹ ------------------------------------------------------------------
 
 
-# --- РЎРѕСЂС‚Р° --------------------------------------------------------------------
+# --- Сорта --------------------------------------------------------------------
 
 def list_grades() -> list[dict]:
     db = get_db()
@@ -35,7 +35,7 @@ def list_grades() -> list[dict]:
 
 
 
-# --- Р—Р°РєСѓРїРѕС‡РЅС‹Рµ С†РµРЅС‹ ----------------------------------------------------------
+# --- Закупочные цены ----------------------------------------------------------
 
 def list_purchase_prices() -> list[dict]:
     db = get_db()
@@ -83,7 +83,7 @@ def delete_purchase_price(price_id: int) -> None:
     db.commit()
 
 
-# --- РџРѕСЃС‚Р°РІС‰РёРєРё ---------------------------------------------------------------
+# --- Поставщики ---------------------------------------------------------------
 
 def list_suppliers() -> list[dict]:
     db = get_db()
@@ -134,8 +134,8 @@ def delete_supplier(supplier_id: int) -> int:
 def add_acceptance(date_: str, season_id: int,
                    grades: list[tuple[int, float, float]],
                    supplier_id: int | None, notes: str | None) -> int:
-    """Создать приёмку (header + lines).
-    grades: [(grade_id, weight_kg, price_per_kg), ...] - только непустые (> 0)."""
+    """Создать приёмку (заголовок + позиции).
+    сорта: [(id_сорта, кг, цена_за_кг), ...] - только непустые (> 0)."""
     db = get_db()
     cur = db.execute("""
         INSERT INTO acceptance (date, season_id, supplier_id, notes)
@@ -156,7 +156,7 @@ def add_acceptance(date_: str, season_id: int,
 
 
 def get_acceptance(acceptance_id: int) -> dict | None:
-    """Вернуть header + список lines. None если не найдено."""
+    """Вернуть заголовок + список позиций. None если не найдено."""
     db = get_db()
     row = db.execute("""
         SELECT a.*, s.name AS supplier_name
@@ -178,7 +178,7 @@ def get_acceptance(acceptance_id: int) -> dict | None:
 
 
 def list_acceptance_for_date(date_: str, season_id: int) -> list[dict]:
-    """Список приёмок (header-only) за дату, с подсчётом итогов по сортам."""
+    """Список приёмок (только заголовок) за дату, с подсчётом итогов по сортам."""
     db = get_db()
     rows = [dict(r) for r in db.execute("""
         SELECT a.id, a.date, a.season_id, a.supplier_id, a.notes,
@@ -208,7 +208,7 @@ def list_acceptance_for_date(date_: str, season_id: int) -> list[dict]:
 def update_acceptance(acceptance_id: int, date_: str,
                       grades: list[tuple[int, float, float]],
                       supplier_id: int | None, notes: str | None) -> None:
-    """Полная перезапись: обновляем header, удаляем старые lines, вставляем новые."""
+    """Полная перезапись: обновляем заголовок, удаляем старые позиции, вставляем новые."""
     db = get_db()
     db.execute("""
         UPDATE acceptance
@@ -234,7 +234,7 @@ def delete_acceptance(acceptance_id: int) -> None:
     db.commit()
 
 
-# --- РћСЃС‚Р°С‚РєРё ------------------------------------------------------------------
+# --- Остатки ------------------------------------------------------------------
 
 def get_raw_stock(season_id: int) -> dict[int, float]:
     """Остатки сырья на складе (неочищенное): принято − очищено (мусор + в холодильник)."""
@@ -327,13 +327,13 @@ def get_raw_stock_total_season(season_id: int) -> dict:
     }
 
 
-# --- РЎСѓС€РєР° --------------------------------------------------------------------
+# --- Сушка --------------------------------------------------------------------
 
 def add_drying_run(date_: str, season_id: int, raw_by_grade: dict, dry_by_grade: dict = None,
                    cost_electricity: float = 0, cost_water: float = 0,
                    cost_firewood: float = 0, cost_labor: float = 0, notes: str | None = None,
                    started_at: str | None = None) -> int:
-    """Создать запись сушки. raw_by_grade/dry_by_grade: {grade_id: кг}."""
+    """Создать запись сушки. сырьё_по_сорту/сухой_по_сорту: {id_сорта: кг}."""
     if dry_by_grade is None:
         dry_by_grade = {}
     db = get_db()
@@ -401,7 +401,7 @@ def delete_drying_run(run_id: int) -> None:
 
 
 def finish_drying(run_id, dry_by_grade):
-    """Завершить сушку: заполнить dry_*_kg и finished_at."""
+    """Завершить сушку: заполнить сухой_*_кг и дата_завершения."""
     db = get_db()
     from datetime import datetime
     d1 = dry_by_grade.get(1, 0.0)
@@ -450,7 +450,7 @@ def list_drying_runs_all(season_id):
         (season_id,),
     ).fetchall()]
 def get_drying_yield_season(season_id: int) -> dict:
-    """РЎСѓРјРјС‹ СЃСѓС€РєРё Р·Р° СЃРµР·РѕРЅ: kg РїРѕ СЃРѕСЂС‚Р°Рј (raw Рё dry), РѕР±С‰РёР№ РІС‹С…РѕРґ %, СЂР°СЃС…РѕРґС‹."""
+    """Суммы сушки за сезон: кг по сортам (сырьё и сухой), общий выход %, расходы."""
     db = get_db()
     row = db.execute("""
         SELECT
@@ -490,7 +490,7 @@ def get_drying_yield_season(season_id: int) -> dict:
     }
 
 
-# --- РњСѓСЃРѕСЂ --------------------------------------------------------------------
+# --- Мусор --------------------------------------------------------------------
 
 def list_acceptances_for_waste(season_id: int) -> list[dict]:
     db = get_db()
@@ -716,7 +716,7 @@ def get_waste_kg_by_date_by_grade(date_: str, season_id: int) -> dict[int, float
 
 
 def get_drying_kg_by_date(date_: str, season_id: int) -> dict:
-    """РЎСѓРјРјС‹ СЃСѓС€РєРё Р·Р° РґРµРЅСЊ: Р·Р°РіСЂСѓР¶РµРЅРѕ Рё РїРѕР»СѓС‡РµРЅРѕ (raw Рё dry)."""
+    """Суммы сушки за день: загружено и получено (сырьё и сухой)."""
     db = get_db()
     row = db.execute("""
         SELECT
@@ -727,7 +727,7 @@ def get_drying_kg_by_date(date_: str, season_id: int) -> dict:
     return {"raw": float(row["raw_total"]), "dry": float(row["dry_total"])}
 
 
-# --- РџРѕРєСѓРїР°С‚РµР»Рё ---------------------------------------------------------------
+# --- Покупатели ---------------------------------------------------------------
 
 def list_buyers() -> list[dict]:
     db = get_db()
@@ -773,7 +773,7 @@ def delete_buyer(buyer_id: int) -> int:
     return affected
 
 
-# --- Продажи (header + lines) ------------------------------------------------
+# --- Продажи (заголовок + позиции) ------------------------------------------------
 
 def add_sale(date_, season_id, buyer_id, lines, notes=""):
     db = get_db()
@@ -885,7 +885,7 @@ def get_sales_kg_by_date(date_, season_id):
     ).fetchone()
     return {"kg": float(row["kg"]), "amount": float(row["amount"])}
 
-# --- Р Р°СЃС…РѕРґС‹ (РѕР±С‰РёРµ, РЅРµ СЃСѓС€РєР°) ------------------------------------------------
+# --- Расходы (общие, не сушка) ------------------------------------------------
 
 def add_expense(date_: str, season_id: int, category: str, amount: float, notes: str | None) -> int:
     db = get_db()
@@ -955,7 +955,7 @@ def get_expenses_by_date(date_: str, season_id: int) -> float:
 # --- Отчёты -------------------------------------------------------------------
 
 def _date_filter(table_alias: str, date_from: str | None, date_to: str | None) -> tuple[str, list]:
-    """Построить фрагмент WHERE и список параметров для фильтра по дате."""
+    """Построить фрагмент условия и список параметров для фильтра по дате."""
     col = f"{table_alias}.date" if table_alias else "date"
     parts = []
     params = []
@@ -971,7 +971,7 @@ def _date_filter(table_alias: str, date_from: str | None, date_to: str | None) -
 
 
 def _period_expr(group_by: str, date_col: str = "date") -> tuple[str, str]:
-    """Вернуть (GROUP_BY_expr, SELECT_label_expr) для группировки по дню/неделе/месяцу."""
+    """Вернуть (выражение_группировки, выражение_выборки) для группировки по дню/неделе/месяцу."""
     if group_by == "week":
         expr = f"strftime('%Y-W%W', {date_col})"
     elif group_by == "month":
@@ -982,7 +982,7 @@ def _period_expr(group_by: str, date_col: str = "date") -> tuple[str, str]:
 
 
 def pnl_by_period(season_id: int, date_from: str | None = None, date_to: str | None = None) -> dict:
-    """P&L за период: выручка минус все расходы."""
+    """Прибыль/Убыток за период: выручка минус все расходы."""
     db = get_db()
     where_s, params_s = _date_filter("s", date_from, date_to)
     where_a, params_a = _date_filter("a", date_from, date_to)
@@ -1309,7 +1309,7 @@ def get_grade_movement(season_id: int, date_from: str | None = None,
     """, (season_id, *params_a)):
         accepted[r["grade_id"]] = float(r["kg"] or 0)
 
-    # В сушку (raw) и выход (dry) по сортам
+    # В сушку (сырьё) и выход (сухой) по сортам
     drying_raw = {1: 0.0, 2: 0.0, 3: 0.0}
     drying_dry = {1: 0.0, 2: 0.0, 3: 0.0}
     row = db.execute(f"""
@@ -1478,7 +1478,7 @@ def get_top_grades(season_id: int, date_from: str | None = None,
 
 def get_cashflow(season_id: int, date_from: str | None = None,
                  date_to: str | None = None) -> list[dict]:
-    """Cash flow по дням: приход (sales), отток (drying_cost + expense), нетто."""
+    """Движение денег по дням: приход (продажи), отток (расходы_на_сушку + расходы), нетто."""
     db = get_db()
     where_s, params_s = _date_filter("s", date_from, date_to)
     where_, params_all = _date_filter("", date_from, date_to)
@@ -1569,7 +1569,7 @@ def get_expenses_detail(season_id: int, date_from: str | None = None,
                 drying[per]["rows"].append({"source": "Сушка", "category": cat, "amount": val})
         drying[per]["total"] += total
 
-    # Acceptance (приёмка грибов)
+    # Приёмка грибов
     acceptance = {}
     pexpr_a, _ = _period_expr(group_by, "a.date")
     where_a, params_a = _date_filter("a", date_from, date_to)

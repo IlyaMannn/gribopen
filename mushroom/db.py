@@ -186,18 +186,18 @@ def migrate_db():
     cols = {}
     for t in existing:
         cols[t] = {r[1] for r in cur.execute(f"PRAGMA table_info({t})").fetchall()}
-    # drying_run: добавить started_at, finished_at
+    # drying_run: добавить дату начала и завершения
     if "drying_run" in existing and "started_at" not in cols.get("drying_run", set()):
         cur.execute("ALTER TABLE drying_run ADD COLUMN started_at TEXT")
         cur.execute("ALTER TABLE drying_run ADD COLUMN finished_at TEXT")
-    # sale: пересоздать (убрать grade_id, weight_kg, price_per_kg, total_amount)
+    # sale: пересоздать таблицу продаж
     if "sale" in existing and "grade_id" in cols.get("sale", set()):
         cur.execute("CREATE TABLE IF NOT EXISTS sale_new (id INTEGER PRIMARY KEY AUTOINCREMENT, date DATE NOT NULL, season_id INTEGER NOT NULL REFERENCES season(id), buyer_id INTEGER REFERENCES buyer(id), notes TEXT)")
         cur.execute("INSERT INTO sale_new (id, date, season_id, buyer_id) SELECT id, date, season_id, buyer_id FROM sale")
         cur.execute("DROP TABLE sale")
         cur.execute("ALTER TABLE sale_new RENAME TO sale")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sale_date ON sale(date)")
-    # drying_expense
+    # таблица расходов на сушку
     if "drying_expense" not in existing:
         cur.execute("""CREATE TABLE IF NOT EXISTS drying_expense (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,7 +209,7 @@ def migrate_db():
             notes TEXT
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_drying_expense_run ON drying_expense(drying_run_id)")
-    # sale_line
+    # позиции продаж
     if "sale_line" not in existing:
         cur.execute("""CREATE TABLE IF NOT EXISTS sale_line (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,15 +220,15 @@ def migrate_db():
             total_amount REAL NOT NULL
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sale_line_sale ON sale_line(sale_id)")
-    # app_setting
+    # настройки приложения
     if "app_setting" not in existing:
         cur.execute("CREATE TABLE IF NOT EXISTS app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    # waste_record: add cleaned columns
+    # waste_record: добавить колонки очистки
     if "waste_record" in existing and "cleaned_grade_1_kg" not in cols.get("waste_record", set()):
         cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_1_kg REAL NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_2_kg REAL NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE waste_record ADD COLUMN cleaned_grade_3_kg REAL NOT NULL DEFAULT 0")
-    # waste_record: add acceptance_id
+    # waste_record: добавить ссылку на приёмку
     if "waste_record" in existing and "acceptance_id" not in cols.get("waste_record", set()):
         cur.execute("ALTER TABLE waste_record ADD COLUMN acceptance_id INTEGER REFERENCES acceptance(id)")
     conn.commit()
